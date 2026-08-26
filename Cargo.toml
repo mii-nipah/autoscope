@@ -1,0 +1,22 @@
+[package]
+name = "autowayland"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "An isolated application runner and UI automation environment for autonomous agents"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+png = "0.18"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.27"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dependencies.smithay]
+git = "https://github.com/Smithay/smithay"
+rev = "92ba0e92c2f8e775cc61a17bdf8a68e122c15610"
+default-features = false
+features = ["desktop", "renderer_pixman", "wayland_frontend"]
