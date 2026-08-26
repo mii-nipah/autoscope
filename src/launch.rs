@@ -112,7 +112,6 @@ fn flatpak_compat_args(app_id: &str, args: &[OsString]) -> Vec<OsString> {
     if app_id == "com.google.Chrome" {
         for (prefix, value) in [
             ("--ozone-platform=", "--ozone-platform=wayland"),
-            ("--disable-gpu", "--disable-gpu"),
             ("--no-first-run", "--no-first-run"),
             ("--no-default-browser-check", "--no-default-browser-check"),
         ] {
@@ -234,7 +233,7 @@ mod tests {
     use super::flatpak_compat_args;
 
     #[test]
-    fn chrome_compatibility_is_internal_and_user_overrides_win() {
+    fn chrome_compatibility_preserves_gpu_and_user_overrides_win() {
         let args = [
             OsString::from("--ozone-platform=headless"),
             OsString::from("https://example.com"),
@@ -247,7 +246,7 @@ mod tests {
                 .count(),
             1
         );
-        assert!(effective.contains(&OsString::from("--disable-gpu")));
+        assert!(!effective.iter().any(|arg| arg == "--disable-gpu"));
         assert_eq!(
             effective.last(),
             Some(&OsString::from("https://example.com"))
