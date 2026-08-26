@@ -2,6 +2,7 @@ mod control;
 mod handlers;
 mod input;
 mod launch;
+mod mcp;
 mod render;
 mod state;
 mod x11;
@@ -18,7 +19,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use control::Request;
-use launch::{HostSession, LaunchSpec, Sandbox};
+use launch::{HostSession, LaunchSession, LaunchSpec, Sandbox};
 use serde_json::json;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use state::Autoscope;
@@ -38,6 +39,8 @@ enum Command {
     Ctl(CtlArgs),
     /// Copy the realtime ASF1 frame stream to stdout.
     Stream { socket: PathBuf },
+    /// Run a stdio MCP server that owns and controls application sessions.
+    Mcp,
 }
 
 #[derive(Args)]
@@ -61,6 +64,9 @@ struct RunArgs {
     /// Launch a Flatpak app ID. Arguments after -- are passed to the app.
     #[arg(long)]
     flatpak: Option<String>,
+    /// Reserve stdout for the coordinator readiness handshake.
+    #[arg(long, hide = true)]
+    coordinator: bool,
     /// Command and arguments. Use -- before the command.
     #[arg(last = true)]
     app: Vec<OsString>,
@@ -146,6 +152,7 @@ fn main() -> Result<()> {
         Command::Run(args) => run(args),
         Command::Ctl(args) => ctl(args),
         Command::Stream { socket } => control::stream_to_stdout(&socket),
+        Command::Mcp => mcp::run(),
     }
 }
 
@@ -195,7 +202,16 @@ fn run(args: RunArgs) -> Result<()> {
             network: !args.no_network,
         },
     };
-    let child = launch::spawn(spec, runtime.path(), &state.socket_name, xdisplay, &host)?;
+    let child = launch::spawn(
+        spec,
+        &LaunchSession {
+            runtime: runtime.path(),
+            wayland_display: &state.socket_name,
+            xdisplay,
+            discard_stdout: args.coordinator,
+        },
+        &host,
+    )?;
     let child_pid = child.id();
     state.app = Some(child);
     if args.window {
@@ -286,14 +302,19 @@ fn ctl(args: CtlArgs) -> Result<()> {
 }
 
 fn validate_run_args(args: &RunArgs) -> Result<()> {
-    if !(320..=3840).contains(&args.width) || !(200..=2160).contains(&args.height) {
-        bail!("size must be between 320x200 and 3840x2160");
-    }
-    if !(1..=60).contains(&args.fps) {
-        bail!("fps must be between 1 and 60");
-    }
+    validate_display(args.width, args.height, args.fps)?;
     if args.flatpak.is_none() && args.app.is_empty() {
         bail!("provide --flatpak APP_ID or a command after --");
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_display(width: i32, height: i32, fps: u32) -> Result<()> {
+    if !(320..=3840).contains(&width) || !(200..=2160).contains(&height) {
+        bail!("size must be between 320x200 and 3840x2160");
+    }
+    if !(1..=60).contains(&fps) {
+        bail!("fps must be between 1 and 60");
     }
     Ok(())
 }

@@ -70,6 +70,18 @@ autoscope ctl "$CONTROL" quit
 
 `move` and coordinate-bearing `click` use absolute frame pixels by default. Add `--normalize` to interpret both axes as `0.0..=1.0`; the endpoints map exactly to the first and last frame pixels. Direct socket clients use the same wire option, for example `{"cmd":"move","x":0.5,"y":0.5,"normalize":true}`. Values outside the normalized range are rejected.
 
+## MCP coordinator
+
+`autoscope mcp` is a stdio MCP server for agents that should not manage application-session processes or socket paths themselves. Configure an MCP client to launch:
+
+```json
+{"command":"autoscope","args":["mcp"]}
+```
+
+The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn waits for the application's first window, then returns a short coordinator ID such as `app-1`; subsequent tools accept that ID. Screenshots are returned directly as MCP `image/png` content, while completed recordings return a local path in the coordinator's private artifact directory.
+
+One MCP process may own multiple independent sessions. Closing the MCP input gracefully closes and reaps every session and application process it still owns; Linux parent-death signaling also prevents a hard-killed coordinator from leaving live session children. Absolute pointer pixels remain the default, and MCP input tools accept `normalize: true` for `0.0..=1.0` coordinates.
+
 ## Realtime frame feed
 
 ```bash
