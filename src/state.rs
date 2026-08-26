@@ -43,7 +43,7 @@ use smithay::{
 
 use crate::control::{self, Envelope, Recorder, Request, Response, Viewer};
 
-pub struct Autowayland {
+pub struct Autoscope {
     pub start_time: Instant,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
@@ -72,7 +72,7 @@ pub struct Autowayland {
     cursor_white: SolidColorBuffer,
 }
 
-impl Autowayland {
+impl Autoscope {
     pub fn new(
         event_loop: &mut EventLoop<Self>,
         display: Display<Self>,
@@ -88,7 +88,7 @@ impl Autowayland {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&display_handle);
         let data_device_state = DataDeviceState::new::<Self>(&display_handle);
         let mut seat_state = SeatState::new();
-        let mut seat = seat_state.new_wl_seat(&display_handle, "autowayland");
+        let mut seat = seat_state.new_wl_seat(&display_handle, "autoscope");
         seat.add_keyboard(
             XkbConfig {
                 layout: "us",
@@ -341,7 +341,7 @@ impl Autowayland {
         self.frame_seq += 1;
         while let Ok((mut stream, _)) = self.stream_listener.accept() {
             let mut header = Vec::with_capacity(20);
-            header.extend_from_slice(b"AWF1");
+            header.extend_from_slice(b"ASF1");
             header.extend_from_slice(&(self.size.0 as u32).to_le_bytes());
             header.extend_from_slice(&(self.size.1 as u32).to_le_bytes());
             header.extend_from_slice(&self.fps.to_le_bytes());
@@ -424,8 +424,8 @@ impl Autowayland {
 }
 
 fn init_wayland_listener(
-    display: Display<Autowayland>,
-    event_loop: &mut EventLoop<Autowayland>,
+    display: Display<Autoscope>,
+    event_loop: &mut EventLoop<Autoscope>,
 ) -> OsString {
     let socket = ListeningSocketSource::new_auto().expect("create Wayland socket");
     let name = socket.socket_name().to_os_string();

@@ -88,7 +88,7 @@ pub fn start_server(path: &Path) -> Result<Receiver<Envelope>> {
     let listener = UnixListener::bind(path).context("bind control socket")?;
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
-        .name("autowayland-control".into())
+        .name("autoscope-control".into())
         .spawn(move || serve(listener, tx))?;
     Ok(rx)
 }
@@ -220,7 +220,7 @@ impl Viewer {
             .args(["-framerate", &fps.to_string(), "-i", "pipe:0", "-an"])
             .args(["-x", &width.min(800).to_string()])
             .args(["-y", &height.min(500).to_string()])
-            .args(["-window_title", &format!("autowayland — {name}")])
+            .args(["-window_title", &format!("autoscope — {name}")])
             .env("XDG_RUNTIME_DIR", &host.runtime_dir)
             .env("WAYLAND_DISPLAY", &host.wayland_display)
             .env_remove("DISPLAY")

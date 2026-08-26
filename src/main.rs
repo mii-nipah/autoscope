@@ -20,7 +20,7 @@ use control::Request;
 use launch::{HostSession, LaunchSpec, Sandbox};
 use serde_json::json;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
-use state::Autowayland;
+use state::Autoscope;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -35,7 +35,7 @@ enum Command {
     Run(RunArgs),
     /// Send one automation command to an instance.
     Ctl(CtlArgs),
-    /// Copy the realtime AWF1 frame stream to stdout.
+    /// Copy the realtime ASF1 frame stream to stdout.
     Stream { socket: PathBuf },
 }
 
@@ -146,12 +146,12 @@ fn run(args: RunArgs) -> Result<()> {
     validate_run_args(&args)?;
     let host = HostSession::capture()?;
     let runtime = tempfile::Builder::new()
-        .prefix(&format!("autowayland-{}-", safe_name(&args.name)))
+        .prefix(&format!("autoscope-{}-", safe_name(&args.name)))
         .tempdir_in(&host.runtime_dir)
         .context("create private instance runtime directory")?;
 
-    let mut event_loop: EventLoop<Autowayland> = EventLoop::try_new()?;
-    let display: Display<Autowayland> = Display::new()?;
+    let mut event_loop: EventLoop<Autoscope> = EventLoop::try_new()?;
+    let display: Display<Autoscope> = Display::new()?;
     let backend = render::create_headless_backend(args.width, args.height)?;
 
     // Children inherit only the instance runtime directory and cannot discover
@@ -165,7 +165,7 @@ fn run(args: RunArgs) -> Result<()> {
     let stream_listener = std::os::unix::net::UnixListener::bind(&stream_path)?;
     stream_listener.set_nonblocking(true)?;
 
-    let mut state = Autowayland::new(
+    let mut state = Autoscope::new(
         &mut event_loop,
         display,
         control_rx,
@@ -293,7 +293,7 @@ fn safe_name(name: &str) -> String {
 
 fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "autowayland=info,warn".into());
+        .unwrap_or_else(|_| "autoscope=info,warn".into());
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 

@@ -35,9 +35,9 @@ use smithay::{
     },
 };
 
-use crate::state::{Autowayland, ClientState};
+use crate::state::{Autoscope, ClientState};
 
-impl CompositorHandler for Autowayland {
+impl CompositorHandler for Autoscope {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.compositor_state
     }
@@ -65,17 +65,17 @@ impl CompositorHandler for Autowayland {
     }
 }
 
-impl BufferHandler for Autowayland {
+impl BufferHandler for Autoscope {
     fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
 }
 
-impl ShmHandler for Autowayland {
+impl ShmHandler for Autoscope {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
     }
 }
 
-impl XdgShellHandler for Autowayland {
+impl XdgShellHandler for Autoscope {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell_state
     }
@@ -158,7 +158,7 @@ impl XdgShellHandler for Autowayland {
     }
 }
 
-impl Autowayland {
+impl Autoscope {
     fn configure_full_output(&mut self, surface: &ToplevelSurface, maximized: bool) {
         surface.with_pending_state(|state| {
             state.size = Some(self.size.into());
@@ -194,7 +194,7 @@ impl Autowayland {
     }
 }
 
-fn handle_xdg_commit(state: &mut Autowayland, surface: &WlSurface) {
+fn handle_xdg_commit(state: &mut Autoscope, surface: &WlSurface) {
     if let Some(window) = state
         .space
         .elements()
@@ -226,7 +226,7 @@ fn handle_xdg_commit(state: &mut Autowayland, surface: &WlSurface) {
     }
 }
 
-impl SeatHandler for Autowayland {
+impl SeatHandler for Autoscope {
     type KeyboardFocus = WlSurface;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
@@ -246,17 +246,17 @@ impl SeatHandler for Autowayland {
     }
 }
 
-impl PointerConstraintsHandler for Autowayland {}
-impl SelectionHandler for Autowayland {
+impl PointerConstraintsHandler for Autoscope {}
+impl SelectionHandler for Autoscope {
     type SelectionUserData = ();
 }
-impl DataDeviceHandler for Autowayland {
+impl DataDeviceHandler for Autoscope {
     fn data_device_state(&mut self) -> &mut DataDeviceState {
         &mut self.data_device_state
     }
 }
-impl DndGrabHandler for Autowayland {}
-impl WaylandDndGrabHandler for Autowayland {
+impl DndGrabHandler for Autoscope {}
+impl WaylandDndGrabHandler for Autoscope {
     fn dnd_requested<S: Source>(
         &mut self,
         source: S,
@@ -268,6 +268,6 @@ impl WaylandDndGrabHandler for Autowayland {
         source.cancel();
     }
 }
-impl OutputHandler for Autowayland {}
+impl OutputHandler for Autoscope {}
 
-smithay::delegate_dispatch2!(Autowayland);
+smithay::delegate_dispatch2!(Autoscope);

@@ -96,7 +96,7 @@ fn spawn_flatpak(
         .args([
             "-c",
             "export WAYLAND_DISPLAY=\"$1\"; shift; export XDG_CONFIG_HOME=\"$HOME/config\" XDG_CACHE_HOME=\"$HOME/cache\" XDG_DATA_HOME=\"$HOME/data\" XDG_STATE_HOME=\"$HOME/state\"; mkdir -p \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\" \"$XDG_STATE_HOME\"; exec \"$@\"",
-            "autowayland-flatpak",
+            "autoscope-flatpak",
         ])
         .arg(wayland_display)
         .arg(app_command)

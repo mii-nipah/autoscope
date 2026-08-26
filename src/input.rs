@@ -4,9 +4,9 @@ use smithay::{
     utils::SERIAL_COUNTER,
 };
 
-use crate::state::Autowayland;
+use crate::state::Autoscope;
 
-impl Autowayland {
+impl Autoscope {
     pub(crate) fn type_text(&mut self, text: &str) -> Result<(), String> {
         let keys: Vec<_> = text
             .chars()

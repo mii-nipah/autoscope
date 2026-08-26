@@ -20,7 +20,7 @@ use smithay::{
     utils::{Buffer, Rectangle, Transform},
 };
 
-use crate::state::Autowayland;
+use crate::state::Autoscope;
 
 pub struct Backend {
     renderer: PixmanRenderer,
@@ -41,8 +41,8 @@ pub fn create_headless_backend(width: i32, height: i32) -> Result<Backend> {
 }
 
 pub fn install(
-    event_loop: &mut EventLoop<Autowayland>,
-    state: &mut Autowayland,
+    event_loop: &mut EventLoop<Autoscope>,
+    state: &mut Autoscope,
     mut backend: Backend,
     fps: u32,
 ) -> Result<()> {
@@ -51,16 +51,16 @@ pub fn install(
         refresh: (fps * 1000) as i32,
     };
     let output = Output::new(
-        "autowayland".into(),
+        "autoscope".into(),
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "autowayland".into(),
+            make: "autoscope".into(),
             model: "virtual-agent-output".into(),
             serial_number: "1".into(),
         },
     );
-    output.create_global::<Autowayland>(&state.display_handle);
+    output.create_global::<Autoscope>(&state.display_handle);
     output.change_current_state(
         Some(mode),
         Some(Transform::Normal),
@@ -105,7 +105,7 @@ fn draw(
     backend: &mut Backend,
     output: &Output,
     damage_tracker: &mut OutputDamageTracker,
-    state: &Autowayland,
+    state: &Autoscope,
 ) -> Result<Vec<u8>> {
     let mut framebuffer = backend.renderer.bind(&mut backend.target)?;
     let cursor = state.cursor_elements();
