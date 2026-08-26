@@ -7,7 +7,6 @@ use std::{
     process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -15,6 +14,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::launch::HostSession;
+
+mod pacing;
+pub(crate) mod timing;
+pub(crate) use pacing::button_code;
+
+fn default_wait() -> bool {
+    true
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "cmd", rename_all = "kebab-case")]
@@ -25,6 +32,10 @@ pub enum Request {
         y: f64,
         #[serde(default)]
         normalize: bool,
+        #[serde(default = "default_wait")]
+        wait: bool,
+        #[serde(default)]
+        view: Option<u64>,
     },
     Click {
         button: String,
@@ -32,20 +43,44 @@ pub enum Request {
         y: Option<f64>,
         #[serde(default)]
         normalize: bool,
+        #[serde(default = "default_wait")]
+        wait: bool,
+        #[serde(default)]
+        view: Option<u64>,
     },
     Button {
         button: String,
         pressed: bool,
+        #[serde(default)]
+        view: Option<u64>,
     },
     Scroll {
         dx: f64,
         dy: f64,
+        #[serde(default = "default_wait")]
+        wait: bool,
+        #[serde(default)]
+        view: Option<u64>,
     },
     Type {
         text: String,
+        #[serde(default = "default_wait")]
+        wait: bool,
+        #[serde(default)]
+        view: Option<u64>,
     },
     Key {
         combo: String,
+        #[serde(default = "default_wait")]
+        wait: bool,
+        #[serde(default)]
+        view: Option<u64>,
+    },
+    Wait {
+        #[serde(default = "default_timeout_ms")]
+        timeout_ms: u64,
+        #[serde(default = "default_quiet_ms")]
+        quiet_ms: u64,
     },
     Screenshot {
         path: PathBuf,
@@ -65,6 +100,14 @@ pub enum Request {
 
 fn default_frames_per_image() -> u32 {
     10
+}
+
+fn default_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_quiet_ms() -> u64 {
+    600
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
@@ -130,17 +173,7 @@ fn serve(listener: UnixListener, tx: Sender<Envelope>) {
     for connection in listener.incoming() {
         let Ok(mut stream) = connection else { break };
         let response = read_request(&stream)
-            .and_then(|request| {
-                let (reply_tx, reply_rx) = mpsc::channel();
-                tx.send(Envelope {
-                    request,
-                    reply: reply_tx,
-                })
-                .map_err(|_| "compositor stopped".to_string())?;
-                reply_rx
-                    .recv_timeout(Duration::from_secs(30))
-                    .map_err(|_| "compositor did not answer".to_string())
-            })
+            .and_then(|request| pacing::execute(&tx, request))
             .unwrap_or_else(Response::error);
         let _ = serde_json::to_writer(&mut stream, &response);
         let _ = stream.write_all(b"\n");
@@ -507,6 +540,8 @@ mod tests {
             x: Some(10.0),
             y: Some(20.0),
             normalize: true,
+            wait: true,
+            view: Some(7),
         };
         let encoded = serde_json::to_string(&request).unwrap();
         assert_eq!(serde_json::from_str::<Request>(&encoded).unwrap(), request);
@@ -519,6 +554,8 @@ mod tests {
                 x: 10.0,
                 y: 20.0,
                 normalize: false,
+                wait: true,
+                view: None,
             }
         );
         assert_eq!(

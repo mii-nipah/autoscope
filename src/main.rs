@@ -104,6 +104,9 @@ enum CtlCommand {
         /// Interpret X and Y as fractions of the session size (0.0 to 1.0).
         #[arg(long)]
         normalize: bool,
+        /// Return after input injection instead of waiting for visual stability.
+        #[arg(long)]
+        no_wait: bool,
         x: f64,
         y: f64,
     },
@@ -117,6 +120,9 @@ enum CtlCommand {
         /// Interpret X and Y as fractions of the session size (0.0 to 1.0).
         #[arg(long, requires = "x")]
         normalize: bool,
+        /// Return after input injection instead of waiting for visual stability.
+        #[arg(long)]
+        no_wait: bool,
     },
     MouseDown {
         #[arg(default_value = "left")]
@@ -127,15 +133,31 @@ enum CtlCommand {
         button: String,
     },
     Scroll {
+        /// Return after input injection instead of waiting for visual stability.
+        #[arg(long)]
+        no_wait: bool,
         dx: f64,
         dy: f64,
     },
     #[command(name = "type")]
     Type {
+        /// Return after paced typing instead of waiting for visual stability.
+        #[arg(long)]
+        no_wait: bool,
         text: String,
     },
     Key {
+        /// Return after input injection instead of waiting for visual stability.
+        #[arg(long)]
+        no_wait: bool,
         combo: String,
+    },
+    /// Wait until the significant screen contents stop changing.
+    Wait {
+        #[arg(long, default_value_t = 5_000)]
+        timeout_ms: u64,
+        #[arg(long, default_value_t = 600)]
+        quiet_ms: u64,
     },
     Screenshot {
         path: PathBuf,
@@ -288,29 +310,65 @@ fn cleanup_runtime(path: &std::path::Path) -> Result<()> {
 fn ctl(args: CtlArgs) -> Result<()> {
     let request = match args.command {
         CtlCommand::Info => Request::Info,
-        CtlCommand::Move { x, y, normalize } => Request::Move { x, y, normalize },
+        CtlCommand::Move {
+            x,
+            y,
+            normalize,
+            no_wait,
+        } => Request::Move {
+            x,
+            y,
+            normalize,
+            wait: !no_wait,
+            view: None,
+        },
         CtlCommand::Click {
             button,
             x,
             y,
             normalize,
+            no_wait,
         } => Request::Click {
             button,
             x,
             y,
             normalize,
+            wait: !no_wait,
+            view: None,
         },
         CtlCommand::MouseDown { button } => Request::Button {
             button,
             pressed: true,
+            view: None,
         },
         CtlCommand::MouseUp { button } => Request::Button {
             button,
             pressed: false,
+            view: None,
         },
-        CtlCommand::Scroll { dx, dy } => Request::Scroll { dx, dy },
-        CtlCommand::Type { text } => Request::Type { text },
-        CtlCommand::Key { combo } => Request::Key { combo },
+        CtlCommand::Scroll { dx, dy, no_wait } => Request::Scroll {
+            dx,
+            dy,
+            wait: !no_wait,
+            view: None,
+        },
+        CtlCommand::Type { text, no_wait } => Request::Type {
+            text,
+            wait: !no_wait,
+            view: None,
+        },
+        CtlCommand::Key { combo, no_wait } => Request::Key {
+            combo,
+            wait: !no_wait,
+            view: None,
+        },
+        CtlCommand::Wait {
+            timeout_ms,
+            quiet_ms,
+        } => Request::Wait {
+            timeout_ms,
+            quiet_ms,
+        },
         CtlCommand::Screenshot { path } => Request::Screenshot { path },
         CtlCommand::RecordStart {
             path,

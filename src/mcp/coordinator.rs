@@ -69,15 +69,22 @@ pub(super) enum Application {
 pub(super) struct SessionInfo {
     pub(super) session: String,
     name: String,
-    pub(super) width: i32,
-    pub(super) height: i32,
+    width: i32,
+    height: i32,
     fps: u32,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub(super) struct ActionResult {
-    session: String,
-    result: Value,
+    pub(super) session: String,
+    pub(super) result: Value,
+}
+
+pub(super) struct Capture {
+    pub(super) info: SessionInfo,
+    pub(super) frame: u64,
+    pub(super) view: u64,
+    pub(super) bytes: Vec<u8>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +100,7 @@ struct Session {
     control: PathBuf,
     child: Child,
     recording: bool,
+    observed_view: Option<u64>,
 }
 
 impl Session {
@@ -110,6 +118,20 @@ impl Session {
                     .and_then(|result| result["surfaces"].as_u64())
                     .is_some_and(|surfaces| surfaces > 0)
             {
+                let response = control::send_request(
+                    &self.control,
+                    &Request::Wait {
+                        timeout_ms: 5_000,
+                        quiet_ms: 750,
+                    },
+                )?;
+                if !response.ok {
+                    bail!(
+                        response
+                            .error
+                            .unwrap_or_else(|| "visual wait failed".into())
+                    );
+                }
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -238,6 +260,7 @@ impl Coordinator {
             control: ready.control,
             child,
             recording: false,
+            observed_view: None,
         };
         if let Err(error) = session.wait_for_surface() {
             let _ = session.stop();
@@ -286,6 +309,33 @@ impl Coordinator {
         })
     }
 
+    pub(super) fn observed_action(
+        &mut self,
+        session: &str,
+        view: u64,
+        request: Request,
+    ) -> Result<(ActionResult, Capture)> {
+        self.guard_view(session, view)?;
+        let action = self.action(session, request)?;
+        let capture = self.screenshot(session)?;
+        Ok((action, capture))
+    }
+
+    fn guard_view(&mut self, session: &str, expected: u64) -> Result<()> {
+        let observed = self
+            .sessions
+            .get(session)
+            .with_context(|| format!("unknown or exited session {session:?}"))?
+            .observed_view
+            .context("take a screenshot before sending input")?;
+        if observed != expected {
+            bail!(
+                "view {expected} is not the latest screenshot delivered for {session}; use view {observed}"
+            );
+        }
+        Ok(())
+    }
+
     fn artifact_path(&mut self, session: &str, extension: &str) -> PathBuf {
         let sequence = self.next_artifact;
         self.next_artifact += 1;
@@ -294,7 +344,7 @@ impl Coordinator {
             .join(format!("{session}-{sequence}.{extension}"))
     }
 
-    pub(super) fn screenshot(&mut self, session: &str) -> Result<(SessionInfo, Vec<u8>)> {
+    pub(super) fn screenshot(&mut self, session: &str) -> Result<Capture> {
         self.reap()?;
         let info = self
             .sessions
@@ -303,10 +353,20 @@ impl Coordinator {
             .info
             .clone();
         let path = self.artifact_path(session, "png");
-        self.request(session, Request::Screenshot { path: path.clone() })?;
+        let result = self.request(session, Request::Screenshot { path: path.clone() })?;
+        let frame = result["frame"]
+            .as_u64()
+            .context("screenshot omitted frame")?;
+        let view = result["view"].as_u64().context("screenshot omitted view")?;
         let bytes = fs::read(&path).context("read captured screenshot")?;
         let _ = fs::remove_file(path);
-        Ok((info, bytes))
+        self.sessions.get_mut(session).unwrap().observed_view = Some(view);
+        Ok(Capture {
+            info,
+            frame,
+            view,
+            bytes,
+        })
     }
 
     pub(super) fn start_recording(

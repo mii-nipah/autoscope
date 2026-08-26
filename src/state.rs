@@ -71,6 +71,8 @@ pub struct Autoscope {
     recorder: Option<Recorder>,
     latest_frame: Option<Vec<u8>>,
     frame_seq: u64,
+    view_seq: u64,
+    view_sample: Option<Vec<[u8; 3]>>,
     fps: u32,
     pub(crate) cursor: MemoryRenderBuffer,
 }
@@ -131,6 +133,8 @@ impl Autoscope {
             recorder: None,
             latest_frame: None,
             frame_seq: 0,
+            view_seq: 0,
+            view_sample: None,
             fps,
             cursor: cursor::buffer(),
         }
@@ -150,7 +154,7 @@ impl Autoscope {
     }
 
     pub fn process_control(&mut self) {
-        while let Ok(envelope) = self.control_rx.try_recv() {
+        if let Ok(envelope) = self.control_rx.try_recv() {
             let response = self.handle_request(envelope.request);
             let _ = envelope.reply.send(response);
         }
@@ -162,19 +166,30 @@ impl Autoscope {
                 "size": [self.size.0, self.size.1],
                 "fps": self.fps,
                 "frame": self.frame_seq,
+                "view": self.view_seq,
                 "cursor": [self.pointer.x, self.pointer.y],
                 "recording": self.recorder.as_ref().map(|r| &r.path),
                 "surfaces": self.space.elements().count(),
             })),
-            Request::Move { x, y, normalize } => self
-                .move_pointer(x, y, normalize)
+            Request::Move {
+                x,
+                y,
+                normalize,
+                view,
+                ..
+            } => self
+                .expect_view(view)
+                .and_then(|_| self.move_pointer(x, y, normalize))
                 .map(|_| json!({"cursor": [self.pointer.x, self.pointer.y]})),
             Request::Click {
                 button,
                 x,
                 y,
                 normalize,
+                view,
+                ..
             } => (|| {
+                self.expect_view(view)?;
                 match (x, y) {
                     (Some(x), Some(y)) => self.move_pointer(x, y, normalize)?,
                     (None, None) if !normalize => {}
@@ -185,18 +200,31 @@ impl Autoscope {
                 self.pointer_button(&button, false)?;
                 Ok(json!({"clicked": button, "at": [self.pointer.x, self.pointer.y]}))
             })(),
-            Request::Button { button, pressed } => self
-                .pointer_button(&button, pressed)
+            Request::Button {
+                button,
+                pressed,
+                view,
+            } => self
+                .expect_view(view)
+                .and_then(|_| self.pointer_button(&button, pressed))
                 .map(|_| json!({"button": button, "pressed": pressed})),
-            Request::Scroll { dx, dy } => {
+            Request::Scroll { dx, dy, view, .. } => (|| {
+                self.expect_view(view)?;
                 self.scroll(dx, dy);
                 Ok(json!({"scrolled": [dx, dy]}))
-            }
-            Request::Type { text } => self
-                .type_text(&text)
+            })(),
+            Request::Type { text, view, .. } => self
+                .expect_view(view)
+                .and_then(|_| self.type_text(&text))
                 .map(|_| json!({"typed": text.chars().count()})),
-            Request::Key { combo } => self.key_combo(&combo).map(|_| json!({"key": combo})),
-            Request::Screenshot { path } => self.screenshot(&path).map(|_| json!({"path": path})),
+            Request::Key { combo, view, .. } => self
+                .expect_view(view)
+                .and_then(|_| self.key_combo(&combo))
+                .map(|_| json!({"key": combo})),
+            Request::Wait { .. } => Err("wait is handled by the control coordinator".into()),
+            Request::Screenshot { path } => self
+                .screenshot(&path)
+                .map(|_| json!({"path": path, "frame": self.frame_seq, "view": self.view_seq})),
             Request::RecordStart {
                 path,
                 fps,
@@ -223,6 +251,18 @@ impl Autoscope {
             .unwrap_or_else(Response::error)
     }
 
+    fn expect_view(&self, expected: Option<u64>) -> Result<(), String> {
+        if let Some(expected) = expected
+            && expected != self.view_seq
+        {
+            return Err(format!(
+                "screen changed from view {expected} to {}; take a new screenshot before sending input",
+                self.view_seq
+            ));
+        }
+        Ok(())
+    }
+
     fn move_pointer(&mut self, x: f64, y: f64, normalize: bool) -> Result<(), String> {
         self.pointer = Point::from(pointer_coordinates(self.size, x, y, normalize)?);
         let pointer = self.seat.get_pointer().unwrap();
@@ -240,12 +280,7 @@ impl Autoscope {
     }
 
     fn pointer_button(&mut self, name: &str, pressed: bool) -> Result<(), String> {
-        let button = match name.to_ascii_lowercase().as_str() {
-            "left" => 0x110,
-            "right" => 0x111,
-            "middle" => 0x112,
-            _ => return Err(format!("unknown mouse button {name:?}")),
-        };
+        let button = control::button_code(name)?;
         let serial = SERIAL_COUNTER.next_serial();
         let pointer = self.seat.get_pointer().unwrap();
         if pressed
@@ -338,6 +373,15 @@ impl Autoscope {
 
     pub fn publish_frame(&mut self, frame: Vec<u8>) {
         self.frame_seq += 1;
+        let sample = control::timing::sample_frame(&frame);
+        if self
+            .view_sample
+            .as_deref()
+            .is_none_or(|before| control::timing::visibly_changed(before, &sample))
+        {
+            self.view_seq += 1;
+            self.view_sample = Some(sample);
+        }
         while let Ok((mut stream, _)) = self.stream_listener.accept() {
             let mut header = Vec::with_capacity(20);
             header.extend_from_slice(b"ASF1");

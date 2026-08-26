@@ -66,11 +66,14 @@ autoscope ctl "$CONTROL" record-stop
 
 autoscope ctl "$CONTROL" scroll 0 640
 autoscope ctl "$CONTROL" key CTRL+L
+autoscope ctl "$CONTROL" wait
 autoscope ctl "$CONTROL" info
 autoscope ctl "$CONTROL" quit
 ```
 
 `type` accepts printable US ASCII and validates the complete string before injecting any key. Named keys include navigation keys, F1–F12, Enter, Tab, Escape, Backspace, Delete, and modifier combinations such as `CTRL+L`.
+
+Input is safe-paced by default. Only one input step is injected per rendered frame, `type` sends one validated character at a time, and `click` gives the application real move, dwell, press, and release phases. Move, click, scroll, type, and key commands then wait up to five seconds for significant pixels to remain unchanged for 600 ms. Their JSON result reports `wait.status` as `stable`, `timed-out`, or `unavailable`, together with the resulting `frame` and `view`; a timeout means “observe this frame and decide,” not that the input failed. `autoscope ctl wait` provides the same bounded barrier explicitly. `--no-wait` skips only the visual-stability wait, and is intended for raw gesture steps such as movement during a held-button drag.
 
 `move` and coordinate-bearing `click` use absolute frame pixels by default. Add `--normalize` to interpret both axes as `0.0..=1.0`; the endpoints map exactly to the first and last frame pixels. Direct socket clients use the same wire option, for example `{"cmd":"move","x":0.5,"y":0.5,"normalize":true}`. Values outside the normalized range are rejected.
 
@@ -84,7 +87,7 @@ Recording FPS is independent from the session FPS: a session and its viewer may 
 {"command":"autoscope","args":["mcp"]}
 ```
 
-The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos or contact sheets, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn waits for the application's first window, then returns a short coordinator ID such as `app-1`; subsequent tools accept that ID. Screenshots are returned directly as MCP `image/png` content. `start_recording` independently selects `fps` and `mode`; `stop_recording` returns an MP4 path for video mode or the chronological contact sheets as MCP image content for models without native video understanding.
+The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos or contact sheets, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn allows up to five seconds for its first window to become visually quiet, then returns a short coordinator ID such as `app-1`, its screenshot, and a `view` number. Every input tool requires the `view` from the most recently returned image, waits for visual stability by default, and returns the next screenshot and view. If the screen changed—or another preplanned action already consumed that observation—the stale action is rejected before input injection. This makes the agent observe each state transition instead of blindly replaying coordinates against a newer layout. `start_recording` independently selects `fps` and `mode`; `stop_recording` returns an MP4 path for video mode or chronological contact sheets as MCP image content for models without native video understanding.
 
 One MCP process may own multiple independent sessions. Closing the MCP input gracefully closes and reaps every session and application process it still owns; Linux parent-death signaling also prevents a hard-killed coordinator from leaving live session children. Absolute pointer pixels remain the default, and MCP input tools accept `normalize: true` for `0.0..=1.0` coordinates.
 

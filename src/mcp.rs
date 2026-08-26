@@ -12,10 +12,11 @@ use rmcp::{
     transport::stdio,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::control::{RecordingMode, Request};
 use coordinator::{
-    ActionResult, Application, Coordinator, SandboxMode, SessionInfo, SessionOptions,
+    ActionResult, Application, Capture, Coordinator, SandboxMode, SessionInfo, SessionOptions,
 };
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -47,15 +48,21 @@ struct SessionParam {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct MoveParams {
     session: String,
+    /// View number returned with the most recent screenshot or input result.
+    view: u64,
     x: f64,
     y: f64,
     /// Interpret x and y as 0.0 through 1.0 instead of absolute pixels.
     normalize: Option<bool>,
+    /// Wait for hover-driven visual stability (default true; false is useful during a drag).
+    wait: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ClickParams {
     session: String,
+    /// View number returned with the most recent screenshot or input result.
+    view: u64,
     /// left, right, or middle (default left).
     button: Option<String>,
     /// Optional click position; x and y must be supplied together.
@@ -69,6 +76,8 @@ struct ClickParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ButtonParams {
     session: String,
+    /// View number returned with the most recent screenshot or input result.
+    view: u64,
     /// left, right, or middle.
     button: String,
     /// true presses and holds; false releases.
@@ -78,6 +87,8 @@ struct ButtonParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ScrollParams {
     session: String,
+    /// View number returned with the most recent screenshot or input result.
+    view: u64,
     /// Horizontal wheel amount.
     dx: f64,
     /// Vertical wheel amount.
@@ -87,12 +98,16 @@ struct ScrollParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct TextParams {
     session: String,
+    /// View number returned with the most recent screenshot or input result.
+    view: u64,
     text: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct KeyParams {
     session: String,
+    /// View number returned with the most recent screenshot or input result.
+    view: u64,
     /// Named key or modifier combination, for example ENTER or CTRL+L.
     combo: String,
 }
@@ -152,6 +167,35 @@ impl AutoscopeMcp {
             .action(session, request)
             .map(Json)
             .map_err(|error| error.to_string())
+    }
+
+    fn observed_action(&self, session: &str, view: u64, request: Request) -> CallToolResult {
+        match self.lock().and_then(|mut coordinator| {
+            coordinator
+                .observed_action(session, view, request)
+                .map_err(|error| error.to_string())
+        }) {
+            Ok((action, capture)) => observation_result(Some(action), capture),
+            Err(error) => CallToolResult::error(vec![ContentBlock::text(error)]),
+        }
+    }
+
+    fn observed_spawn(&self, application: Application, options: SessionOptions) -> CallToolResult {
+        match self.lock().and_then(|mut coordinator| {
+            let info = coordinator
+                .spawn(application, options)
+                .map_err(|error| error.to_string())?;
+            match coordinator.screenshot(&info.session) {
+                Ok(capture) => Ok(capture),
+                Err(error) => {
+                    let _ = coordinator.close(&info.session);
+                    Err(error.to_string())
+                }
+            }
+        }) {
+            Ok(capture) => observation_result(None, capture),
+            Err(error) => CallToolResult::error(vec![ContentBlock::text(error)]),
+        }
     }
 
     fn recording_result(&self, session: &str) -> CallToolResult {
@@ -214,40 +258,57 @@ impl AutoscopeMcp {
     }
 }
 
+fn observation_result(action: Option<ActionResult>, capture: Capture) -> CallToolResult {
+    let session = capture.info.session.clone();
+    let wait = action
+        .as_ref()
+        .and_then(|action| action.result["wait"]["status"].as_str())
+        .map(|status| format!(" Visual wait: {status}."))
+        .unwrap_or_default();
+    let mut result = CallToolResult::success(vec![
+        ContentBlock::text(format!(
+            "{session} is at view {} (frame {}).{wait} Use view={} for the next input tool.",
+            capture.view, capture.frame, capture.view,
+        )),
+        ContentBlock::image(
+            base64::engine::general_purpose::STANDARD.encode(capture.bytes),
+            "image/png",
+        ),
+    ]);
+    let mut structured = serde_json::to_value(capture.info).expect("serialize session info");
+    if let Value::Object(fields) = &mut structured {
+        fields.insert("frame".into(), capture.frame.into());
+        fields.insert("view".into(), capture.view.into());
+        if let Some(action) = action {
+            fields.insert("result".into(), action.result);
+        }
+    }
+    result.structured_content = Some(structured);
+    result
+}
+
 #[tool_router]
 impl AutoscopeMcp {
     #[tool(
-        description = "Spawn a host command and wait for its first window in a new isolated autoscope session"
+        description = "Spawn a host command, allow bounded visual settling of its first window, and return its screenshot and view number"
     )]
-    fn spawn_command(
-        &self,
-        Parameters(params): Parameters<SpawnCommandParams>,
-    ) -> Result<Json<SessionInfo>, String> {
+    fn spawn_command(&self, Parameters(params): Parameters<SpawnCommandParams>) -> CallToolResult {
         let application = Application::Command {
             argv: params.command,
             sandbox: params.sandbox.unwrap_or(SandboxMode::Auto),
         };
-        self.lock()?
-            .spawn(application, params.options.unwrap_or_default())
-            .map(Json)
-            .map_err(|error| error.to_string())
+        self.observed_spawn(application, params.options.unwrap_or_default())
     }
 
     #[tool(
-        description = "Spawn an installed Flatpak application and wait for its first window in a new isolated autoscope session"
+        description = "Spawn a Flatpak application, allow bounded visual settling of its first window, and return its screenshot and view number"
     )]
-    fn spawn_flatpak(
-        &self,
-        Parameters(params): Parameters<SpawnFlatpakParams>,
-    ) -> Result<Json<SessionInfo>, String> {
+    fn spawn_flatpak(&self, Parameters(params): Parameters<SpawnFlatpakParams>) -> CallToolResult {
         let application = Application::Flatpak {
             id: params.application_id,
             args: params.arguments.unwrap_or_default(),
         };
-        self.lock()?
-            .spawn(application, params.options.unwrap_or_default())
-            .map(Json)
-            .map_err(|error| error.to_string())
+        self.observed_spawn(application, params.options.unwrap_or_default())
     }
 
     #[tool(description = "List active application sessions owned by this MCP server")]
@@ -267,83 +328,97 @@ impl AutoscopeMcp {
     }
 
     #[tool(
-        description = "Move the mouse using absolute pixels or normalized 0.0 through 1.0 coordinates"
+        description = "Move from the supplied observed view, wait for hover UI by default, and return the resulting screenshot and view"
     )]
-    fn move_pointer(
-        &self,
-        Parameters(params): Parameters<MoveParams>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.action(
+    fn move_pointer(&self, Parameters(params): Parameters<MoveParams>) -> CallToolResult {
+        self.observed_action(
             &params.session,
+            params.view,
             Request::Move {
                 x: params.x,
                 y: params.y,
                 normalize: params.normalize.unwrap_or(false),
+                wait: params.wait.unwrap_or(true),
+                view: Some(params.view),
             },
         )
     }
 
-    #[tool(description = "Click the left, right, or middle mouse button, optionally at a position")]
-    fn click(
-        &self,
-        Parameters(params): Parameters<ClickParams>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.action(
+    #[tool(
+        description = "Click only if the supplied observed view is still current, then wait for visual stability and return a new screenshot and view"
+    )]
+    fn click(&self, Parameters(params): Parameters<ClickParams>) -> CallToolResult {
+        self.observed_action(
             &params.session,
+            params.view,
             Request::Click {
                 button: params.button.unwrap_or_else(|| "left".into()),
                 x: params.x,
                 y: params.y,
                 normalize: params.normalize.unwrap_or(false),
+                wait: true,
+                view: Some(params.view),
             },
         )
     }
 
-    #[tool(description = "Press or release a mouse button; combine with move_pointer to drag")]
-    fn mouse_button(
-        &self,
-        Parameters(params): Parameters<ButtonParams>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.action(
+    #[tool(
+        description = "Press or release a mouse button from the supplied observed view and return the resulting screenshot and view; use move_pointer wait=false between drag endpoints"
+    )]
+    fn mouse_button(&self, Parameters(params): Parameters<ButtonParams>) -> CallToolResult {
+        self.observed_action(
             &params.session,
+            params.view,
             Request::Button {
                 button: params.button,
                 pressed: params.pressed,
+                view: Some(params.view),
             },
         )
     }
 
-    #[tool(description = "Send horizontal and vertical mouse wheel input")]
-    fn scroll(
-        &self,
-        Parameters(params): Parameters<ScrollParams>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.action(
+    #[tool(
+        description = "Scroll only if the supplied observed view is current, wait for visual stability, and return a new screenshot and view"
+    )]
+    fn scroll(&self, Parameters(params): Parameters<ScrollParams>) -> CallToolResult {
+        self.observed_action(
             &params.session,
+            params.view,
             Request::Scroll {
                 dx: params.dx,
                 dy: params.dy,
+                wait: true,
+                view: Some(params.view),
             },
         )
     }
 
-    #[tool(description = "Type printable US-ASCII text into the focused application")]
-    fn type_text(
-        &self,
-        Parameters(params): Parameters<TextParams>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.action(&params.session, Request::Type { text: params.text })
+    #[tool(
+        description = "Type printable US-ASCII at UI-safe speed only if the supplied observed view is current, then return the settled screenshot and new view"
+    )]
+    fn type_text(&self, Parameters(params): Parameters<TextParams>) -> CallToolResult {
+        self.observed_action(
+            &params.session,
+            params.view,
+            Request::Type {
+                text: params.text,
+                wait: true,
+                view: Some(params.view),
+            },
+        )
     }
 
-    #[tool(description = "Press a named key or modifier combination such as ENTER or CTRL+L")]
-    fn press_key(
-        &self,
-        Parameters(params): Parameters<KeyParams>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.action(
+    #[tool(
+        description = "Press a key only if the supplied observed view is current, wait for visual stability, and return a new screenshot and view"
+    )]
+    fn press_key(&self, Parameters(params): Parameters<KeyParams>) -> CallToolResult {
+        self.observed_action(
             &params.session,
+            params.view,
             Request::Key {
                 combo: params.combo,
+                wait: true,
+                view: Some(params.view),
             },
         )
     }
@@ -355,16 +430,7 @@ impl AutoscopeMcp {
                 .screenshot(&params.session)
                 .map_err(|error| error.to_string())
         }) {
-            Ok((info, bytes)) => CallToolResult::success(vec![
-                ContentBlock::image(
-                    base64::engine::general_purpose::STANDARD.encode(bytes),
-                    "image/png",
-                ),
-                ContentBlock::text(format!(
-                    "Screenshot of {} at {}x{}",
-                    info.session, info.width, info.height
-                )),
-            ]),
+            Ok(capture) => observation_result(None, capture),
             Err(error) => CallToolResult::error(vec![ContentBlock::text(error)]),
         }
     }
@@ -408,7 +474,7 @@ impl ServerHandler for AutoscopeMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("autoscope", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Spawn an application first, retain its returned session ID, then use that ID for input and capture tools. Screenshots return MCP image content. Recordings select FPS independently; images mode returns compact chronological contact sheets for clients without video understanding. Absolute pixels are the coordinate default; set normalize=true for 0.0 through 1.0 coordinates. Sessions are closed automatically when this MCP server exits.",
+                "Spawn allows bounded visual settling, then returns a screenshot, session ID, and view number. Every input tool requires that latest view, waits for bounded visual stability by default, and returns the resulting screenshot and next view; stale or concurrently planned actions are rejected before injection. Re-read each returned image before choosing another coordinate, and treat wait status timed-out as an instruction to observe or wait again. Text is paced at UI-safe speed. Absolute pixels are the coordinate default; set normalize=true for 0.0 through 1.0. move_pointer wait=false is reserved for drag steps. Recordings select FPS independently, and images mode returns chronological contact sheets. Sessions close automatically when this server exits.",
             )
     }
 }

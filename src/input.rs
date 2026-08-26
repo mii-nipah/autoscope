@@ -6,13 +6,17 @@ use smithay::{
 
 use crate::state::Autoscope;
 
+pub(crate) fn validate_text(text: &str) -> Result<(), String> {
+    text.chars()
+        .all(|character| char_key(character).is_some())
+        .then_some(())
+        .ok_or_else(|| "type supports the printable US-ASCII keymap".to_string())
+}
+
 impl Autoscope {
     pub(crate) fn type_text(&mut self, text: &str) -> Result<(), String> {
-        let keys: Vec<_> = text
-            .chars()
-            .map(char_key)
-            .collect::<Option<_>>()
-            .ok_or_else(|| "type supports the printable US-ASCII keymap".to_string())?;
+        validate_text(text)?;
+        let keys: Vec<_> = text.chars().map(char_key).map(Option::unwrap).collect();
         for (code, shifted) in keys {
             if shifted {
                 self.send_key(42, KeyState::Pressed);
