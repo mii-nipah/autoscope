@@ -42,7 +42,7 @@ use smithay::{
     },
 };
 
-use crate::control::{self, Envelope, Recorder, Request, Response, Viewer};
+use crate::control::{self, Envelope, Recorder, RecordingMode, Request, Response, Viewer};
 use crate::x11::X11State;
 
 pub struct Autoscope {
@@ -234,10 +234,22 @@ impl Autoscope {
                 .map(|_| json!({"typed": text.chars().count()})),
             Request::Key { combo } => self.key_combo(&combo).map(|_| json!({"key": combo})),
             Request::Screenshot { path } => self.screenshot(&path).map(|_| json!({"path": path})),
-            Request::RecordStart { path } => {
-                self.start_recording(&path).map(|_| json!({"path": path}))
-            }
-            Request::RecordStop => self.stop_recording().map(|path| json!({"path": path})),
+            Request::RecordStart {
+                path,
+                fps,
+                mode,
+                frames_per_image,
+            } => self
+                .start_recording(&path, fps, mode, frames_per_image)
+                .map(|fps| {
+                    json!({
+                        "path": path,
+                        "fps": fps,
+                        "mode": mode,
+                        "frames_per_image": frames_per_image,
+                    })
+                }),
+            Request::RecordStop => self.stop_recording().map(|result| json!(result)),
             Request::Quit => {
                 self.loop_signal.stop();
                 Ok(json!({"stopping": true}))
@@ -325,17 +337,35 @@ impl Autoscope {
             .map_err(|e| e.to_string())
     }
 
-    fn start_recording(&mut self, path: &std::path::Path) -> Result<(), String> {
+    fn start_recording(
+        &mut self,
+        path: &std::path::Path,
+        fps: Option<u32>,
+        mode: RecordingMode,
+        frames_per_image: u32,
+    ) -> Result<u32, String> {
         if self.recorder.is_some() {
             return Err("a recording is already active".into());
         }
-        self.recorder = Some(
-            Recorder::start(path, self.size.0, self.size.1, self.fps).map_err(|e| e.to_string())?,
-        );
-        Ok(())
+        let fps = fps.unwrap_or(self.fps);
+        let mut recorder = Recorder::start(
+            path,
+            self.size.0,
+            self.size.1,
+            self.fps,
+            fps,
+            mode,
+            frames_per_image,
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some(frame) = &self.latest_frame {
+            recorder.frame(frame).map_err(|error| error.to_string())?;
+        }
+        self.recorder = Some(recorder);
+        Ok(fps)
     }
 
-    fn stop_recording(&mut self) -> Result<std::path::PathBuf, String> {
+    fn stop_recording(&mut self) -> Result<control::RecordingResult, String> {
         self.recorder
             .take()
             .ok_or_else(|| "no recording is active".to_string())?

@@ -15,7 +15,7 @@ use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::control::{self, Request};
+use crate::control::{self, RecordingMode, RecordingResult, Request};
 
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -92,7 +92,7 @@ struct Session {
     info: SessionInfo,
     control: PathBuf,
     child: Child,
-    recording: Option<PathBuf>,
+    recording: bool,
 }
 
 impl Session {
@@ -237,7 +237,7 @@ impl Coordinator {
             info: info.clone(),
             control: ready.control,
             child,
-            recording: None,
+            recording: false,
         };
         if let Err(error) = session.wait_for_surface() {
             let _ = session.stop();
@@ -309,36 +309,55 @@ impl Coordinator {
         Ok((info, bytes))
     }
 
-    pub(super) fn start_recording(&mut self, session: &str) -> Result<ActionResult> {
+    pub(super) fn start_recording(
+        &mut self,
+        session: &str,
+        fps: Option<u32>,
+        mode: RecordingMode,
+        frames_per_image: u32,
+    ) -> Result<ActionResult> {
         self.reap()?;
         if self
             .sessions
             .get(session)
             .with_context(|| format!("unknown or exited session {session:?}"))?
             .recording
-            .is_some()
         {
             bail!("session is already recording");
         }
-        let path = self.artifact_path(session, "mp4");
-        let result = self.request(session, Request::RecordStart { path: path.clone() })?;
-        self.sessions.get_mut(session).unwrap().recording = Some(path);
+        let extension = match mode {
+            RecordingMode::Video => "mp4",
+            RecordingMode::Images => "png",
+        };
+        let path = self.artifact_path(session, extension);
+        let result = self.request(
+            session,
+            Request::RecordStart {
+                path,
+                fps,
+                mode,
+                frames_per_image,
+            },
+        )?;
+        self.sessions.get_mut(session).unwrap().recording = true;
         Ok(ActionResult {
             session: session.into(),
             result,
         })
     }
 
-    pub(super) fn stop_recording(&mut self, session: &str) -> Result<ActionResult> {
+    pub(super) fn stop_recording(&mut self, session: &str) -> Result<RecordingResult> {
+        if !self
+            .sessions
+            .get(session)
+            .with_context(|| format!("unknown or exited session {session:?}"))?
+            .recording
+        {
+            bail!("session was not recording");
+        }
         let result = self.request(session, Request::RecordStop)?;
-        self.sessions
-            .get_mut(session)
-            .and_then(|session| session.recording.take())
-            .context("session was not recording")?;
-        Ok(ActionResult {
-            session: session.into(),
-            result,
-        })
+        self.sessions.get_mut(session).unwrap().recording = false;
+        serde_json::from_value(result).context("decode recording result")
     }
 
     pub(super) fn close(&mut self, session: &str) -> Result<SessionInfo> {

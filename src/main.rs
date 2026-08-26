@@ -141,9 +141,32 @@ enum CtlCommand {
     },
     RecordStart {
         path: PathBuf,
+        /// Recording FPS; defaults to the session FPS.
+        #[arg(long)]
+        fps: Option<u32>,
+        #[arg(long, value_enum, default_value_t = RecordingModeArg::Video)]
+        mode: RecordingModeArg,
+        /// Frames tiled into each image sheet (images mode, maximum 10).
+        #[arg(long, default_value_t = 10)]
+        frames_per_image: u32,
     },
     RecordStop,
     Quit,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum RecordingModeArg {
+    Video,
+    Images,
+}
+
+impl From<RecordingModeArg> for control::RecordingMode {
+    fn from(value: RecordingModeArg) -> Self {
+        match value {
+            RecordingModeArg::Video => Self::Video,
+            RecordingModeArg::Images => Self::Images,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -288,7 +311,17 @@ fn ctl(args: CtlArgs) -> Result<()> {
         CtlCommand::Type { text } => Request::Type { text },
         CtlCommand::Key { combo } => Request::Key { combo },
         CtlCommand::Screenshot { path } => Request::Screenshot { path },
-        CtlCommand::RecordStart { path } => Request::RecordStart { path },
+        CtlCommand::RecordStart {
+            path,
+            fps,
+            mode,
+            frames_per_image,
+        } => Request::RecordStart {
+            path,
+            fps,
+            mode: mode.into(),
+            frames_per_image,
+        },
         CtlCommand::RecordStop => Request::RecordStop,
         CtlCommand::Quit => Request::Quit,
     };

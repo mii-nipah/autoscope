@@ -55,9 +55,13 @@ autoscope ctl "$CONTROL" type "smithay compositor"
 autoscope ctl "$CONTROL" key ENTER
 autoscope ctl "$CONTROL" screenshot /tmp/search.png
 
-autoscope ctl "$CONTROL" record-start /tmp/click.mp4
+autoscope ctl "$CONTROL" record-start --fps 1 /tmp/click.mp4
 autoscope ctl "$CONTROL" click --x 620 --y 250
 autoscope ctl "$CONTROL" click --normalize --x 0.5 --y 0.25
+autoscope ctl "$CONTROL" record-stop
+
+autoscope ctl "$CONTROL" record-start --mode images --fps 1 --frames-per-image 10 /tmp/actions.png
+# perform actions, then stop to produce actions-001.png, actions-002.png, ...
 autoscope ctl "$CONTROL" record-stop
 
 autoscope ctl "$CONTROL" scroll 0 640
@@ -70,6 +74,8 @@ autoscope ctl "$CONTROL" quit
 
 `move` and coordinate-bearing `click` use absolute frame pixels by default. Add `--normalize` to interpret both axes as `0.0..=1.0`; the endpoints map exactly to the first and last frame pixels. Direct socket clients use the same wire option, for example `{"cmd":"move","x":0.5,"y":0.5,"normalize":true}`. Values outside the normalized range are rejected.
 
+Recording FPS is independent from the session FPS: a session and its viewer may remain at 60 FPS while evidence is sampled at 1 FPS. Omitting recording `--fps` preserves the old behavior by using the session FPS; a recording cannot request more frames than the session produces. `--mode images` creates chronological contact-sheet PNGs instead of a video, ordered left-to-right and then top-to-bottom. Each sampled frame is immediately reduced to at most 320 pixels wide, and `--frames-per-image` accepts 1 through 10 thumbnails per sheet, keeping both images and memory compact.
+
 ## MCP coordinator
 
 `autoscope mcp` is a stdio MCP server for agents that should not manage application-session processes or socket paths themselves. Configure an MCP client to launch:
@@ -78,7 +84,7 @@ autoscope ctl "$CONTROL" quit
 {"command":"autoscope","args":["mcp"]}
 ```
 
-The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn waits for the application's first window, then returns a short coordinator ID such as `app-1`; subsequent tools accept that ID. Screenshots are returned directly as MCP `image/png` content, while completed recordings return a local path in the coordinator's private artifact directory.
+The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos or contact sheets, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn waits for the application's first window, then returns a short coordinator ID such as `app-1`; subsequent tools accept that ID. Screenshots are returned directly as MCP `image/png` content. `start_recording` independently selects `fps` and `mode`; `stop_recording` returns an MP4 path for video mode or the chronological contact sheets as MCP image content for models without native video understanding.
 
 One MCP process may own multiple independent sessions. Closing the MCP input gracefully closes and reaps every session and application process it still owns; Linux parent-death signaling also prevents a hard-killed coordinator from leaving live session children. Absolute pointer pixels remain the default, and MCP input tools accept `normalize: true` for `0.0..=1.0` coordinates.
 

@@ -13,7 +13,7 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::control::Request;
+use crate::control::{RecordingMode, Request};
 use coordinator::{
     ActionResult, Application, Coordinator, SandboxMode, SessionInfo, SessionOptions,
 };
@@ -97,6 +97,33 @@ struct KeyParams {
     combo: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum RecordingModeParam {
+    Video,
+    Images,
+}
+
+impl From<RecordingModeParam> for RecordingMode {
+    fn from(value: RecordingModeParam) -> Self {
+        match value {
+            RecordingModeParam::Video => Self::Video,
+            RecordingModeParam::Images => Self::Images,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct StartRecordingParams {
+    session: String,
+    /// Recording FPS; defaults to the session FPS and cannot exceed it.
+    fps: Option<u32>,
+    /// video creates an MP4; images creates chronological contact-sheet PNGs.
+    mode: Option<RecordingModeParam>,
+    /// Frames per contact sheet in images mode (default and maximum 10).
+    frames_per_image: Option<u32>,
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct SessionsResult {
     sessions: Vec<SessionInfo>,
@@ -125,6 +152,65 @@ impl AutoscopeMcp {
             .action(session, request)
             .map(Json)
             .map_err(|error| error.to_string())
+    }
+
+    fn recording_result(&self, session: &str) -> CallToolResult {
+        let recording = match self.lock().and_then(|mut coordinator| {
+            coordinator
+                .stop_recording(session)
+                .map_err(|error| error.to_string())
+        }) {
+            Ok(recording) => recording,
+            Err(error) => return CallToolResult::error(vec![ContentBlock::text(error)]),
+        };
+        let mode = match recording.mode {
+            RecordingMode::Video => "video",
+            RecordingMode::Images => "images",
+        };
+        let ordering = if recording.mode == RecordingMode::Images {
+            " Contact-sheet frames read left-to-right, then top-to-bottom."
+        } else {
+            ""
+        };
+        let mut content = vec![ContentBlock::text(format!(
+            "Recorded {} frames at {} FPS as {mode}.{ordering}",
+            recording.frames, recording.fps,
+        ))];
+        if recording.mode == RecordingMode::Images {
+            for (index, path) in recording.files.iter().enumerate() {
+                let bytes = match std::fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return CallToolResult::error(vec![ContentBlock::text(format!(
+                            "read contact sheet {}: {error}",
+                            path.display()
+                        ))]);
+                    }
+                };
+                content.push(ContentBlock::text(format!(
+                    "Contact sheet {} of {} ({})",
+                    index + 1,
+                    recording.files.len(),
+                    path.display()
+                )));
+                content.push(ContentBlock::image(
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                    "image/png",
+                ));
+            }
+        } else if let Some(path) = recording.files.first() {
+            content.push(ContentBlock::text(format!("MP4: {}", path.display())));
+        }
+        let mut result = CallToolResult::success(content);
+        result.structured_content = match serde_json::to_value(recording) {
+            Ok(recording) => Some(recording),
+            Err(error) => {
+                return CallToolResult::error(vec![ContentBlock::text(format!(
+                    "encode recording result: {error}"
+                ))]);
+            }
+        };
+        result
     }
 }
 
@@ -283,26 +369,25 @@ impl AutoscopeMcp {
         }
     }
 
-    #[tool(description = "Start recording session frames to a coordinator-managed MP4 file")]
+    #[tool(description = "Start an independently sampled MP4 or contact-sheet image recording")]
     fn start_recording(
         &self,
-        Parameters(params): Parameters<SessionParam>,
+        Parameters(params): Parameters<StartRecordingParams>,
     ) -> Result<Json<ActionResult>, String> {
         self.lock()?
-            .start_recording(&params.session)
+            .start_recording(
+                &params.session,
+                params.fps,
+                params.mode.map(Into::into).unwrap_or_default(),
+                params.frames_per_image.unwrap_or(10),
+            )
             .map(Json)
             .map_err(|error| error.to_string())
     }
 
-    #[tool(description = "Stop recording and return the completed MP4 file path")]
-    fn stop_recording(
-        &self,
-        Parameters(params): Parameters<SessionParam>,
-    ) -> Result<Json<ActionResult>, String> {
-        self.lock()?
-            .stop_recording(&params.session)
-            .map(Json)
-            .map_err(|error| error.to_string())
+    #[tool(description = "Stop recording and return an MP4 path or chronological MCP image sheets")]
+    fn stop_recording(&self, Parameters(params): Parameters<SessionParam>) -> CallToolResult {
+        self.recording_result(&params.session)
     }
 
     #[tool(description = "Close an application session and reap all of its processes")]
@@ -323,7 +408,7 @@ impl ServerHandler for AutoscopeMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("autoscope", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Spawn an application first, retain its returned session ID, then use that ID for input and capture tools. Screenshots return MCP image content. Absolute pixels are the coordinate default; set normalize=true for 0.0 through 1.0 coordinates. Sessions are closed automatically when this MCP server exits.",
+                "Spawn an application first, retain its returned session ID, then use that ID for input and capture tools. Screenshots return MCP image content. Recordings select FPS independently; images mode returns compact chronological contact sheets for clients without video understanding. Absolute pixels are the coordinate default; set normalize=true for 0.0 through 1.0 coordinates. Sessions are closed automatically when this MCP server exits.",
             )
     }
 }
