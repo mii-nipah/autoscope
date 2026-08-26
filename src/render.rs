@@ -5,8 +5,10 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            Bind, ExportMem, Offscreen, damage::OutputDamageTracker,
-            element::solid::SolidColorRenderElement, pixman::PixmanRenderer,
+            Bind, ExportMem, Offscreen,
+            damage::OutputDamageTracker,
+            element::{Kind, memory::MemoryRenderBufferRenderElement},
+            pixman::PixmanRenderer,
         },
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
@@ -108,8 +110,21 @@ fn draw(
     state: &Autoscope,
 ) -> Result<Vec<u8>> {
     let mut framebuffer = backend.renderer.bind(&mut backend.target)?;
-    let cursor = state.cursor_elements();
-    smithay::desktop::space::render_output::<_, SolidColorRenderElement, _, _>(
+    let cursor = [MemoryRenderBufferRenderElement::from_buffer(
+        &mut backend.renderer,
+        (state.pointer.x.round(), state.pointer.y.round()),
+        &state.cursor,
+        None,
+        None,
+        None,
+        Kind::Cursor,
+    )?];
+    smithay::desktop::space::render_output::<
+        _,
+        MemoryRenderBufferRenderElement<PixmanRenderer>,
+        _,
+        _,
+    >(
         output,
         &mut backend.renderer,
         &mut framebuffer,

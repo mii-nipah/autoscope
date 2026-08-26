@@ -1,4 +1,5 @@
 mod control;
+mod cursor;
 mod handlers;
 mod input;
 mod launch;

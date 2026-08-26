@@ -11,10 +11,7 @@ use serde_json::json;
 use smithay::{
     backend::{
         input::{Axis, AxisSource, ButtonState, InputTime},
-        renderer::element::{
-            Kind,
-            solid::{SolidColorBuffer, SolidColorRenderElement},
-        },
+        renderer::element::memory::MemoryRenderBuffer,
     },
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{
@@ -42,8 +39,11 @@ use smithay::{
     },
 };
 
-use crate::control::{self, Envelope, Recorder, RecordingMode, Request, Response, Viewer};
-use crate::x11::X11State;
+use crate::{
+    control::{self, Envelope, Recorder, RecordingMode, Request, Response, Viewer},
+    cursor,
+    x11::X11State,
+};
 
 pub struct Autoscope {
     pub start_time: Instant,
@@ -72,8 +72,7 @@ pub struct Autoscope {
     latest_frame: Option<Vec<u8>>,
     frame_seq: u64,
     fps: u32,
-    cursor_black: SolidColorBuffer,
-    cursor_white: SolidColorBuffer,
+    pub(crate) cursor: MemoryRenderBuffer,
 }
 
 impl Autoscope {
@@ -133,8 +132,7 @@ impl Autoscope {
             latest_frame: None,
             frame_seq: 0,
             fps,
-            cursor_black: SolidColorBuffer::new((17, 3), [0.0, 0.0, 0.0, 0.9]),
-            cursor_white: SolidColorBuffer::new((13, 1), [1.0, 1.0, 1.0, 1.0]),
+            cursor: cursor::buffer(),
         }
     }
 
@@ -149,41 +147,6 @@ impl Autoscope {
                     .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
                     .map(|(surface, offset)| (surface, (offset + location).to_f64()))
             })
-    }
-
-    pub fn cursor_elements(&self) -> Vec<SolidColorRenderElement> {
-        let x = self.pointer.x.round() as i32;
-        let y = self.pointer.y.round() as i32;
-        vec![
-            SolidColorRenderElement::from_buffer(
-                &self.cursor_white,
-                (x - 6, y),
-                1.0,
-                1.0,
-                Kind::Cursor,
-            ),
-            SolidColorRenderElement::from_buffer(
-                &self.cursor_white,
-                (x, y - 6),
-                (1.0 / 13.0, 13.0),
-                1.0,
-                Kind::Cursor,
-            ),
-            SolidColorRenderElement::from_buffer(
-                &self.cursor_black,
-                (x - 8, y - 1),
-                1.0,
-                1.0,
-                Kind::Cursor,
-            ),
-            SolidColorRenderElement::from_buffer(
-                &self.cursor_black,
-                (x - 1, y - 8),
-                (3.0 / 17.0, 17.0 / 3.0),
-                1.0,
-                Kind::Cursor,
-            ),
-        ]
     }
 
     pub fn process_control(&mut self) {
