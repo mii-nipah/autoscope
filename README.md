@@ -2,6 +2,8 @@
 
 `autoscope` runs one Linux application in an isolated UI automation session for autonomous agents. Native Wayland and X11 applications use the same control and capture interface; a normal agent does not configure displays, choose a renderer, manage application profiles, or understand compositor protocols.
 
+Run `autoscope readme` for the complete standalone command guide.
+
 ## Agent contract
 
 An agent only needs this lifecycle:

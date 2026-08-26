@@ -25,6 +25,8 @@ use serde_json::json;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use state::Autoscope;
 
+const COMMAND_GUIDE: &str = include_str!("../USAGE.md");
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
@@ -34,6 +36,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print the complete non-MCP command guide.
+    Readme,
     /// Run one application inside a private automation session.
     Run(RunArgs),
     /// Send one automation command to an instance.
@@ -195,6 +199,9 @@ impl From<RecordingModeArg> for control::RecordingMode {
 fn main() -> Result<()> {
     init_logging();
     match Cli::parse().command {
+        Command::Readme => io::stdout()
+            .write_all(COMMAND_GUIDE.as_bytes())
+            .context("write command guide"),
         Command::Run(args) => run(args),
         Command::Ctl(args) => ctl(args),
         Command::Stream { socket } => control::stream_to_stdout(&socket),
@@ -432,11 +439,59 @@ fn init_logging() {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_name;
+    use clap::CommandFactory;
+
+    use super::{COMMAND_GUIDE, Cli, safe_name};
 
     #[test]
     fn instance_names_cannot_escape_the_runtime_directory() {
         assert_eq!(safe_name("../../qa chrome"), "qachrome");
         assert_eq!(safe_name(""), "instance");
+    }
+
+    #[test]
+    fn command_guide_covers_the_public_non_mcp_cli() {
+        let cli = Cli::command();
+        for command in cli
+            .get_subcommands()
+            .filter(|command| command.get_name() != "mcp")
+        {
+            let invocation = format!("autoscope {}", command.get_name());
+            assert!(
+                COMMAND_GUIDE.contains(&invocation),
+                "command guide omits {invocation}"
+            );
+
+            for option in command
+                .get_arguments()
+                .filter_map(|argument| argument.get_long())
+                .filter(|option| *option != "coordinator")
+            {
+                assert!(
+                    COMMAND_GUIDE.contains(&format!("--{option}")),
+                    "command guide omits --{option}"
+                );
+            }
+
+            if command.get_name() == "ctl" {
+                for control in command.get_subcommands() {
+                    let invocation = format!("autoscope ctl SOCKET {}", control.get_name());
+                    assert!(
+                        COMMAND_GUIDE.contains(&invocation),
+                        "command guide omits {invocation}"
+                    );
+                    for option in control
+                        .get_arguments()
+                        .filter_map(|argument| argument.get_long())
+                    {
+                        assert!(
+                            COMMAND_GUIDE.contains(&format!("--{option}")),
+                            "command guide omits --{option}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(!COMMAND_GUIDE.to_ascii_lowercase().contains("mcp"));
     }
 }
