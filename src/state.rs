@@ -203,13 +203,19 @@ impl Autoscope {
                 "recording": self.recorder.as_ref().map(|r| &r.path),
                 "surfaces": self.space.elements().count(),
             })),
-            Request::Move { x, y } => self
-                .move_pointer(x, y)
+            Request::Move { x, y, normalize } => self
+                .move_pointer(x, y, normalize)
                 .map(|_| json!({"cursor": [self.pointer.x, self.pointer.y]})),
-            Request::Click { button, x, y } => (|| {
+            Request::Click {
+                button,
+                x,
+                y,
+                normalize,
+            } => (|| {
                 match (x, y) {
-                    (Some(x), Some(y)) => self.move_pointer(x, y)?,
-                    (None, None) => {}
+                    (Some(x), Some(y)) => self.move_pointer(x, y, normalize)?,
+                    (None, None) if !normalize => {}
+                    (None, None) => return Err("normalize needs click coordinates".into()),
                     _ => return Err("click needs both x and y".into()),
                 }
                 self.pointer_button(&button, true)?;
@@ -242,14 +248,8 @@ impl Autoscope {
             .unwrap_or_else(Response::error)
     }
 
-    fn move_pointer(&mut self, x: f64, y: f64) -> Result<(), String> {
-        if !x.is_finite() || !y.is_finite() {
-            return Err("coordinates must be finite".into());
-        }
-        self.pointer = Point::from((
-            x.clamp(0.0, f64::from(self.size.0 - 1)),
-            y.clamp(0.0, f64::from(self.size.1 - 1)),
-        ));
+    fn move_pointer(&mut self, x: f64, y: f64, normalize: bool) -> Result<(), String> {
+        self.pointer = Point::from(pointer_coordinates(self.size, x, y, normalize)?);
         let pointer = self.seat.get_pointer().unwrap();
         pointer.motion(
             self,
@@ -429,6 +429,27 @@ impl Autoscope {
     }
 }
 
+fn pointer_coordinates(
+    size: (i32, i32),
+    x: f64,
+    y: f64,
+    normalize: bool,
+) -> Result<(f64, f64), String> {
+    if !x.is_finite() || !y.is_finite() {
+        return Err("coordinates must be finite".into());
+    }
+    if normalize {
+        if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) {
+            return Err("normalized coordinates must be between 0.0 and 1.0".into());
+        }
+        return Ok((x * f64::from(size.0 - 1), y * f64::from(size.1 - 1)));
+    }
+    Ok((
+        x.clamp(0.0, f64::from(size.0 - 1)),
+        y.clamp(0.0, f64::from(size.1 - 1)),
+    ))
+}
+
 fn init_wayland_listener(
     display: Display<Autoscope>,
     event_loop: &mut EventLoop<'static, Autoscope>,
@@ -466,4 +487,28 @@ pub struct ClientState {
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pointer_coordinates;
+
+    #[test]
+    fn normalized_coordinates_cover_the_complete_frame() {
+        let size = (1280, 800);
+        assert_eq!(pointer_coordinates(size, 0.0, 0.0, true), Ok((0.0, 0.0)));
+        assert_eq!(
+            pointer_coordinates(size, 1.0, 1.0, true),
+            Ok((1279.0, 799.0))
+        );
+        assert_eq!(
+            pointer_coordinates(size, 0.5, 0.5, true),
+            Ok((639.5, 399.5))
+        );
+        assert!(pointer_coordinates(size, 1.01, 0.5, true).is_err());
+        assert_eq!(
+            pointer_coordinates(size, 1280.0, -1.0, false),
+            Ok((1279.0, 0.0))
+        );
+    }
 }

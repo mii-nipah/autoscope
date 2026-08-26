@@ -94,6 +94,9 @@ struct CtlArgs {
 enum CtlCommand {
     Info,
     Move {
+        /// Interpret X and Y as fractions of the session size (0.0 to 1.0).
+        #[arg(long)]
+        normalize: bool,
         x: f64,
         y: f64,
     },
@@ -104,6 +107,9 @@ enum CtlCommand {
         x: Option<f64>,
         #[arg(long, requires = "x")]
         y: Option<f64>,
+        /// Interpret X and Y as fractions of the session size (0.0 to 1.0).
+        #[arg(long, requires = "x")]
+        normalize: bool,
     },
     MouseDown {
         #[arg(default_value = "left")]
@@ -242,8 +248,18 @@ fn cleanup_runtime(path: &std::path::Path) -> Result<()> {
 fn ctl(args: CtlArgs) -> Result<()> {
     let request = match args.command {
         CtlCommand::Info => Request::Info,
-        CtlCommand::Move { x, y } => Request::Move { x, y },
-        CtlCommand::Click { button, x, y } => Request::Click { button, x, y },
+        CtlCommand::Move { x, y, normalize } => Request::Move { x, y, normalize },
+        CtlCommand::Click {
+            button,
+            x,
+            y,
+            normalize,
+        } => Request::Click {
+            button,
+            x,
+            y,
+            normalize,
+        },
         CtlCommand::MouseDown { button } => Request::Button {
             button,
             pressed: true,

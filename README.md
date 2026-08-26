@@ -49,6 +49,7 @@ Assuming `CONTROL` is the `control` path from the ready JSON:
 
 ```bash
 autoscope ctl "$CONTROL" move 620 370
+autoscope ctl "$CONTROL" move --normalize 0.5 0.5
 autoscope ctl "$CONTROL" click
 autoscope ctl "$CONTROL" type "smithay compositor"
 autoscope ctl "$CONTROL" key ENTER
@@ -56,6 +57,7 @@ autoscope ctl "$CONTROL" screenshot /tmp/search.png
 
 autoscope ctl "$CONTROL" record-start /tmp/click.mp4
 autoscope ctl "$CONTROL" click --x 620 --y 250
+autoscope ctl "$CONTROL" click --normalize --x 0.5 --y 0.25
 autoscope ctl "$CONTROL" record-stop
 
 autoscope ctl "$CONTROL" scroll 0 640
@@ -65,6 +67,8 @@ autoscope ctl "$CONTROL" quit
 ```
 
 `type` accepts printable US ASCII and validates the complete string before injecting any key. Named keys include navigation keys, F1–F12, Enter, Tab, Escape, Backspace, Delete, and modifier combinations such as `CTRL+L`.
+
+`move` and coordinate-bearing `click` use absolute frame pixels by default. Add `--normalize` to interpret both axes as `0.0..=1.0`; the endpoints map exactly to the first and last frame pixels. Direct socket clients use the same wire option, for example `{"cmd":"move","x":0.5,"y":0.5,"normalize":true}`. Values outside the normalized range are rejected.
 
 ## Realtime frame feed
 

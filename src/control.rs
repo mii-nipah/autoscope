@@ -22,11 +22,15 @@ pub enum Request {
     Move {
         x: f64,
         y: f64,
+        #[serde(default)]
+        normalize: bool,
     },
     Click {
         button: String,
         x: Option<f64>,
         y: Option<f64>,
+        #[serde(default)]
+        normalize: bool,
     },
     Button {
         button: String,
@@ -253,9 +257,20 @@ mod tests {
             button: "left".into(),
             x: Some(10.0),
             y: Some(20.0),
+            normalize: true,
         };
         let encoded = serde_json::to_string(&request).unwrap();
         assert_eq!(serde_json::from_str::<Request>(&encoded).unwrap(), request);
         assert!(encoded.contains("\"cmd\":\"click\""));
+        assert!(encoded.contains("\"normalize\":true"));
+
+        assert_eq!(
+            serde_json::from_str::<Request>(r#"{"cmd":"move","x":10,"y":20}"#).unwrap(),
+            Request::Move {
+                x: 10.0,
+                y: 20.0,
+                normalize: false,
+            }
+        );
     }
 }
