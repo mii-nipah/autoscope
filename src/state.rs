@@ -38,10 +38,12 @@ use smithay::{
         shell::xdg::XdgShellState,
         shm::ShmState,
         socket::ListeningSocketSource,
+        xwayland_shell::XWaylandShellState,
     },
 };
 
 use crate::control::{self, Envelope, Recorder, Request, Response, Viewer};
+use crate::x11::X11State;
 
 pub struct Autoscope {
     pub start_time: Instant,
@@ -51,6 +53,8 @@ pub struct Autoscope {
     pub loop_signal: LoopSignal,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub xwayland_shell_state: XWaylandShellState,
+    pub x11: X11State,
     pub shm_state: ShmState,
     _output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Self>,
@@ -74,7 +78,7 @@ pub struct Autoscope {
 
 impl Autoscope {
     pub fn new(
-        event_loop: &mut EventLoop<Self>,
+        event_loop: &mut EventLoop<'static, Self>,
         display: Display<Self>,
         control_rx: Receiver<Envelope>,
         stream_listener: UnixListener,
@@ -84,6 +88,7 @@ impl Autoscope {
         let display_handle = display.handle();
         let compositor_state = CompositorState::new::<Self>(&display_handle);
         let xdg_shell_state = XdgShellState::new::<Self>(&display_handle);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&display_handle);
         let shm_state = ShmState::new::<Self>(&display_handle, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&display_handle);
         let data_device_state = DataDeviceState::new::<Self>(&display_handle);
@@ -109,6 +114,8 @@ impl Autoscope {
             loop_signal: event_loop.get_signal(),
             compositor_state,
             xdg_shell_state,
+            xwayland_shell_state,
+            x11: X11State::Starting,
             shm_state,
             _output_manager_state: output_manager_state,
             seat_state,
@@ -274,11 +281,10 @@ impl Autoscope {
                 .map(|(w, p)| (w.clone(), p))
         {
             self.space.raise_element(&window, true);
-            self.seat.get_keyboard().unwrap().set_focus(
-                self,
-                Some(window.toplevel().unwrap().wl_surface().clone()),
-                serial,
-            );
+            self.seat
+                .get_keyboard()
+                .unwrap()
+                .set_focus(self, Some(window.into()), serial);
         }
         pointer.button(
             self,
@@ -425,7 +431,7 @@ impl Autoscope {
 
 fn init_wayland_listener(
     display: Display<Autoscope>,
-    event_loop: &mut EventLoop<Autoscope>,
+    event_loop: &mut EventLoop<'static, Autoscope>,
 ) -> OsString {
     let socket = ListeningSocketSource::new_auto().expect("create Wayland socket");
     let name = socket.socket_name().to_os_string();

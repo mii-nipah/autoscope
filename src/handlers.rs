@@ -21,6 +21,7 @@ use smithay::{
         },
         output::OutputHandler,
         pointer_constraints::PointerConstraintsHandler,
+        seat::WaylandFocus,
         selection::{
             SelectionHandler,
             data_device::{
@@ -33,6 +34,7 @@ use smithay::{
         },
         shm::{ShmHandler, ShmState},
     },
+    xwayland::XWaylandClientData,
 };
 
 use crate::state::{Autoscope, ClientState};
@@ -43,7 +45,11 @@ impl CompositorHandler for Autoscope {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        if let Some(state) = client.get_data::<XWaylandClientData>() {
+            &state.compositor_state
+        } else {
+            &client.get_data::<ClientState>().unwrap().compositor_state
+        }
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -53,11 +59,11 @@ impl CompositorHandler for Autoscope {
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
-            if let Some(window) = self.space.elements().find(|window| {
-                window
-                    .toplevel()
-                    .is_some_and(|top| top.wl_surface() == &root)
-            }) {
+            if let Some(window) = self
+                .space
+                .elements()
+                .find(|window| window.wl_surface().is_some_and(|surface| *surface == root))
+            {
                 window.on_commit();
             }
         }
@@ -87,13 +93,12 @@ impl XdgShellHandler for Autoscope {
             state.states.set(xdg_toplevel::State::Maximized);
             state.states.set(xdg_toplevel::State::Activated);
         });
-        let focus = surface.wl_surface().clone();
         let window = smithay::desktop::Window::new_wayland_window(surface);
         window.set_activated(true);
-        self.space.map_element(window, (0, 0), true);
+        self.space.map_element(window.clone(), (0, 0), true);
         self.seat.get_keyboard().unwrap().set_focus(
             self,
-            Some(focus),
+            Some(window.into()),
             SERIAL_COUNTER.next_serial(),
         );
     }
@@ -227,7 +232,7 @@ fn handle_xdg_commit(state: &mut Autoscope, surface: &WlSurface) {
 }
 
 impl SeatHandler for Autoscope {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = crate::x11::KeyboardFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -240,8 +245,10 @@ impl SeatHandler for Autoscope {
         _image: smithay::input::pointer::CursorImageStatus,
     ) {
     }
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
-        let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&Self::KeyboardFocus>) {
+        let client = focused
+            .and_then(WaylandFocus::wl_surface)
+            .and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client);
     }
 }

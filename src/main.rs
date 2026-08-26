@@ -4,6 +4,7 @@ mod input;
 mod launch;
 mod render;
 mod state;
+mod x11;
 
 use std::{
     ffi::OsString,
@@ -54,7 +55,7 @@ struct RunArgs {
     window: bool,
     #[arg(long, value_enum, default_value_t = SandboxArg::Auto)]
     sandbox: SandboxArg,
-    /// Give a bwrap-launched application a private network namespace.
+    /// Remove network access from the application sandbox.
     #[arg(long)]
     no_network: bool,
     /// Launch a Flatpak app ID. Arguments after -- are passed to the app.
@@ -150,7 +151,7 @@ fn run(args: RunArgs) -> Result<()> {
         .tempdir_in(&host.runtime_dir)
         .context("create private instance runtime directory")?;
 
-    let mut event_loop: EventLoop<Autoscope> = EventLoop::try_new()?;
+    let mut event_loop: EventLoop<'static, Autoscope> = EventLoop::try_new()?;
     let display: Display<Autoscope> = Display::new()?;
     let backend = render::create_headless_backend(args.width, args.height)?;
 
@@ -174,11 +175,13 @@ fn run(args: RunArgs) -> Result<()> {
         args.fps,
     );
     render::install(&mut event_loop, &mut state, backend, args.fps)?;
+    let xdisplay = x11::start(&mut event_loop, &mut state)?;
 
     let spec = match args.flatpak {
         Some(app_id) => LaunchSpec::Flatpak {
             app_id,
             args: args.app,
+            network: !args.no_network,
         },
         None => LaunchSpec::Command {
             argv: args.app,
@@ -186,7 +189,7 @@ fn run(args: RunArgs) -> Result<()> {
             network: !args.no_network,
         },
     };
-    let child = launch::spawn(spec, runtime.path(), &state.socket_name, &host)?;
+    let child = launch::spawn(spec, runtime.path(), &state.socket_name, xdisplay, &host)?;
     let child_pid = child.id();
     state.app = Some(child);
     if args.window {
@@ -215,6 +218,7 @@ fn run(args: RunArgs) -> Result<()> {
 
     let result = event_loop.run(None, &mut state, |_| {});
     state.shutdown();
+    x11::stop(&mut state);
     let cleanup = cleanup_runtime(runtime.path());
     result?;
     cleanup?;

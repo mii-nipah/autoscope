@@ -44,7 +44,7 @@ impl Autoscope {
             );
         }
         let (key, implied_shift) = if key_name.chars().count() == 1 {
-            char_key(key_name.chars().next().unwrap()).unwrap()
+            combo_char(key_name.chars().next().unwrap(), !modifiers.is_empty()).unwrap()
         } else {
             (
                 named_key(key_name).ok_or_else(|| format!("unknown key {key_name:?}"))?,
@@ -76,6 +76,14 @@ impl Autoscope {
             |_, _, _| FilterResult::Forward,
         );
     }
+}
+
+fn combo_char(character: char, has_modifiers: bool) -> Option<(u32, bool)> {
+    char_key(if has_modifiers && character.is_ascii_alphabetic() {
+        character.to_ascii_lowercase()
+    } else {
+        character
+    })
 }
 
 fn named_key(name: &str) -> Option<u32> {
@@ -156,7 +164,7 @@ fn char_key(character: char) -> Option<(u32, bool)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{char_key, named_key};
+    use super::{char_key, combo_char, named_key};
 
     #[test]
     fn text_mapping_preserves_case_and_symbols() {
@@ -165,5 +173,7 @@ mod tests {
         assert_eq!(char_key('?'), Some((53, true)));
         assert_eq!(char_key('é'), None);
         assert_eq!(named_key("ctrl"), Some(29));
+        assert_eq!(combo_char('A', true), char_key('a'));
+        assert_eq!(combo_char('A', false), char_key('A'));
     }
 }

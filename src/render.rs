@@ -41,7 +41,7 @@ pub fn create_headless_backend(width: i32, height: i32) -> Result<Backend> {
 }
 
 pub fn install(
-    event_loop: &mut EventLoop<Autoscope>,
+    event_loop: &mut EventLoop<'static, Autoscope>,
     state: &mut Autoscope,
     mut backend: Backend,
     fps: u32,

@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
+    os::unix::fs::FileTypeExt,
     path::{Path, PathBuf},
     process::{Child, Command},
 };
@@ -29,6 +30,7 @@ pub enum LaunchSpec {
     Flatpak {
         app_id: String,
         args: Vec<OsString>,
+        network: bool,
     },
     Command {
         argv: Vec<OsString>,
@@ -48,25 +50,38 @@ pub fn spawn(
     spec: LaunchSpec,
     runtime: &Path,
     wayland_display: &OsStr,
+    xdisplay: u32,
     host: &HostSession,
 ) -> Result<Child> {
     match spec {
-        LaunchSpec::Flatpak { app_id, args } => {
-            spawn_flatpak(&app_id, &args, runtime, wayland_display, host)
-        }
+        LaunchSpec::Flatpak {
+            app_id,
+            args,
+            network,
+        } => spawn_flatpak(
+            &app_id,
+            &args,
+            network,
+            runtime,
+            wayland_display,
+            xdisplay,
+            host,
+        ),
         LaunchSpec::Command {
             argv,
             sandbox,
             network,
-        } => spawn_command(&argv, sandbox, network, runtime, wayland_display),
+        } => spawn_command(&argv, sandbox, network, runtime, wayland_display, xdisplay),
     }
 }
 
 fn spawn_flatpak(
     app_id: &str,
     args: &[OsString],
+    network: bool,
     runtime: &Path,
     wayland_display: &OsStr,
+    xdisplay: u32,
     host: &HostSession,
 ) -> Result<Child> {
     let runtime_name = runtime
@@ -78,13 +93,29 @@ fn spawn_flatpak(
         fs::create_dir_all(home.join("config/google-chrome"))?;
         fs::create_dir_all(runtime.join("app/com.google.Chrome"))?;
     }
-    let app_command = flatpak_app_command(app_id)?;
+    let app_command = if app_id == "com.google.Chrome" {
+        "/app/extra/chrome".into()
+    } else {
+        flatpak_app_command(app_id)?
+    };
     let app_args = flatpak_compat_args(app_id, args);
+    let display = format!(":{xdisplay}");
     let mut command = Command::new("flatpak");
+    command.arg("run").args([
+        "--sandbox",
+        "--die-with-parent",
+        "--no-session-bus",
+        "--no-a11y-bus",
+        "--no-documents-portal",
+        "--device=dri",
+        "--command=sh",
+        "--nosocket=wayland",
+        "--socket=x11",
+    ]);
+    if network {
+        command.arg("--share=network");
+    }
     command
-        .arg("run")
-        .args(["--command=sh", "--nosocket=wayland", "--nosocket=x11"])
-        .arg("--nosocket=fallback-x11")
         .arg(format!(
             "--filesystem=xdg-run/{}",
             runtime_name.to_string_lossy()
@@ -95,15 +126,17 @@ fn spawn_flatpak(
         .arg(app_id)
         .args([
             "-c",
-            "export WAYLAND_DISPLAY=\"$1\"; shift; export XDG_CONFIG_HOME=\"$HOME/config\" XDG_CACHE_HOME=\"$HOME/cache\" XDG_DATA_HOME=\"$HOME/data\" XDG_STATE_HOME=\"$HOME/state\"; mkdir -p \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\" \"$XDG_STATE_HOME\"; exec \"$@\"",
+            "export WAYLAND_DISPLAY=\"$1\" DISPLAY=\"$2\"; shift 2; export XDG_CONFIG_HOME=\"$HOME/config\" XDG_CACHE_HOME=\"$HOME/cache\" XDG_DATA_HOME=\"$HOME/data\" XDG_STATE_HOME=\"$HOME/state\"; mkdir -p \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\" \"$XDG_STATE_HOME\"; exec \"$@\"",
             "autoscope-flatpak",
         ])
         .arg(wayland_display)
+        .arg(&display)
         .arg(app_command)
         .args(app_args)
         .env("XDG_RUNTIME_DIR", &host.runtime_dir)
         .env("WAYLAND_DISPLAY", &host.wayland_display)
-        .env_remove("DISPLAY");
+        .env("DISPLAY", &display)
+        .env_remove("XAUTHORITY");
     command.spawn().context("launch Flatpak application")
 }
 
@@ -112,6 +145,8 @@ fn flatpak_compat_args(app_id: &str, args: &[OsString]) -> Vec<OsString> {
     if app_id == "com.google.Chrome" {
         for (prefix, value) in [
             ("--ozone-platform=", "--ozone-platform=wayland"),
+            ("--no-sandbox", "--no-sandbox"),
+            ("--test-type", "--test-type"),
             ("--no-first-run", "--no-first-run"),
             ("--no-default-browser-check", "--no-default-browser-check"),
         ] {
@@ -147,6 +182,7 @@ fn spawn_command(
     network: bool,
     runtime: &Path,
     wayland_display: &OsStr,
+    xdisplay: u32,
 ) -> Result<Child> {
     let Some(program) = argv.first() else {
         bail!("empty application command");
@@ -156,7 +192,8 @@ fn spawn_command(
             .args(&argv[1..])
             .env("XDG_RUNTIME_DIR", runtime)
             .env("WAYLAND_DISPLAY", wayland_display)
-            .env_remove("DISPLAY")
+            .env("DISPLAY", format!(":{xdisplay}"))
+            .env_remove("XAUTHORITY")
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .spawn()
             .context("launch application");
@@ -165,6 +202,10 @@ fn spawn_command(
     let cwd = env::current_dir()?;
     let home = runtime.join("home");
     fs::create_dir(&home)?;
+    let x_socket = PathBuf::from(format!("/tmp/.X11-unix/X{xdisplay}"));
+    if !fs::metadata(&x_socket)?.file_type().is_socket() {
+        bail!("private X11 display socket is not a socket");
+    }
     let uid_dir = runtime.parent().context("runtime has no user directory")?;
     let mut command = Command::new("bwrap");
     command
@@ -197,7 +238,11 @@ fn spawn_command(
         .arg("--ro-bind")
         .arg(&cwd)
         .arg("/work")
-        .args(["--tmpfs", "/tmp", "--chdir", "/work"])
+        .args(["--tmpfs", "/tmp", "--dir", "/tmp/.X11-unix"])
+        .arg("--ro-bind")
+        .arg(&x_socket)
+        .arg(&x_socket)
+        .args(["--chdir", "/work"])
         .args(["--setenv", "HOME", "/home/agent"])
         .args(["--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin"])
         .arg("--setenv")
@@ -206,9 +251,12 @@ fn spawn_command(
         .arg("--setenv")
         .arg("WAYLAND_DISPLAY")
         .arg(wayland_display)
+        .arg("--setenv")
+        .arg("DISPLAY")
+        .arg(format!(":{xdisplay}"))
         .args([
             "--unsetenv",
-            "DISPLAY",
+            "XAUTHORITY",
             "--unsetenv",
             "DBUS_SESSION_BUS_ADDRESS",
         ]);
@@ -247,6 +295,8 @@ mod tests {
             1
         );
         assert!(!effective.iter().any(|arg| arg == "--disable-gpu"));
+        assert!(effective.iter().any(|arg| arg == "--no-sandbox"));
+        assert!(effective.iter().any(|arg| arg == "--test-type"));
         assert_eq!(
             effective.last(),
             Some(&OsString::from("https://example.com"))

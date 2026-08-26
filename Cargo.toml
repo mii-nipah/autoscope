@@ -19,4 +19,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 git = "https://github.com/Smithay/smithay"
 rev = "92ba0e92c2f8e775cc61a17bdf8a68e122c15610"
 default-features = false
-features = ["desktop", "renderer_pixman", "wayland_frontend"]
+features = ["desktop", "renderer_pixman", "wayland_frontend", "xwayland"]
