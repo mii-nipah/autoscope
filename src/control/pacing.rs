@@ -16,6 +16,7 @@ pub(super) fn execute(tx: &Sender<Envelope>, request: Request) -> Result<Respons
     const TYPE_INTERVAL: Duration = Duration::from_millis(25);
 
     let (response, wait) = match request {
+        Request::Drag { path, wait, view } => (super::gesture::execute(tx, path, view)?, wait),
         Request::Move {
             x,
             y,
@@ -177,7 +178,7 @@ pub(super) fn execute(tx: &Sender<Envelope>, request: Request) -> Result<Respons
     Ok(with_wait(response, observation))
 }
 
-fn dispatch(tx: &Sender<Envelope>, request: Request) -> Result<Response, String> {
+pub(super) fn dispatch(tx: &Sender<Envelope>, request: Request) -> Result<Response, String> {
     let (reply_tx, reply_rx) = mpsc::channel();
     tx.send(Envelope {
         request,

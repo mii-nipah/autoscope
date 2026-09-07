@@ -13,9 +13,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::launch::HostSession;
-
+mod gesture;
+mod viewer;
+pub(crate) use viewer::Viewer;
 mod pacing;
+pub(crate) use gesture::DragPath;
 pub(crate) mod timing;
 pub(crate) use pacing::button_code;
 
@@ -43,6 +45,14 @@ pub enum Request {
         y: Option<f64>,
         #[serde(default)]
         normalize: bool,
+        #[serde(default = "default_wait")]
+        wait: bool,
+        #[serde(default)]
+        view: Option<u64>,
+    },
+    Drag {
+        #[serde(flatten)]
+        path: DragPath,
         #[serde(default = "default_wait")]
         wait: bool,
         #[serde(default)]
@@ -189,7 +199,17 @@ fn read_request(stream: &UnixStream) -> std::result::Result<Request, String> {
 }
 
 pub fn send_request(path: &Path, request: &Request) -> Result<Response> {
+    send_request_with_timeout(path, request, None)
+}
+
+pub fn send_request_with_timeout(
+    path: &Path,
+    request: &Request,
+    timeout: Option<std::time::Duration>,
+) -> Result<Response> {
     let mut stream = UnixStream::connect(path).context("connect to control socket")?;
+    stream.set_read_timeout(timeout)?;
+    stream.set_write_timeout(timeout)?;
     serde_json::to_writer(&mut stream, request)?;
     stream.write_all(b"\n")?;
     let mut line = String::new();
@@ -482,49 +502,6 @@ fn numbered_png(base: &Path, sequence: usize) -> PathBuf {
         .and_then(OsStr::to_str)
         .unwrap_or("recording");
     base.with_file_name(format!("{stem}-{sequence:03}.png"))
-}
-
-pub struct Viewer {
-    child: Child,
-    input: ChildStdin,
-}
-
-impl Viewer {
-    pub fn start(
-        width: i32,
-        height: i32,
-        fps: u32,
-        name: &str,
-        host: &HostSession,
-    ) -> Result<Self> {
-        let mut child = Command::new("ffplay")
-            .args(["-hide_banner", "-loglevel", "warning", "-f", "rawvideo"])
-            .args(["-pixel_format", "rgba", "-video_size"])
-            .arg(format!("{width}x{height}"))
-            .args(["-framerate", &fps.to_string(), "-i", "pipe:0", "-an"])
-            .args(["-x", &width.min(800).to_string()])
-            .args(["-y", &height.min(500).to_string()])
-            .args(["-window_title", &format!("autoscope — {name}")])
-            .env("XDG_RUNTIME_DIR", &host.runtime_dir)
-            .env("WAYLAND_DISPLAY", &host.wayland_display)
-            .env_remove("DISPLAY")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()
-            .context("start ffplay viewer")?;
-        let input = child.stdin.take().context("open ffplay input")?;
-        Ok(Self { child, input })
-    }
-
-    pub fn frame(&mut self, rgba: &[u8]) -> io::Result<()> {
-        self.input.write_all(rgba)
-    }
-
-    pub fn stop(mut self) {
-        drop(self.input);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 #[cfg(test)]

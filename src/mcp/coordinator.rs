@@ -34,6 +34,8 @@ pub(super) struct SessionOptions {
     window: Option<bool>,
     /// Remove application network access.
     no_network: Option<bool>,
+    /// Host folder shared read/write with the app; defaults to a durable private folder.
+    shared_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -72,6 +74,8 @@ pub(super) struct SessionInfo {
     width: i32,
     height: i32,
     fps: u32,
+    pub(super) shared_dir: PathBuf,
+    session_dir: PathBuf,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -93,6 +97,8 @@ struct Ready {
     control: PathBuf,
     size: [i32; 2],
     fps: u32,
+    shared_dir: PathBuf,
+    session: PathBuf,
 }
 
 struct Session {
@@ -162,22 +168,16 @@ pub(super) struct Coordinator {
     sessions: BTreeMap<String, Session>,
     next_session: u64,
     next_artifact: u64,
-    artifacts: tempfile::TempDir,
+    artifacts: PathBuf,
 }
 
 impl Coordinator {
     pub(super) fn new() -> Result<Self> {
-        let runtime = env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .context("XDG_RUNTIME_DIR is required")?;
         Ok(Self {
             sessions: BTreeMap::new(),
             next_session: 1,
             next_artifact: 1,
-            artifacts: tempfile::Builder::new()
-                .prefix("autoscope-mcp-")
-                .tempdir_in(runtime)
-                .context("create MCP artifact directory")?,
+            artifacts: crate::session::artifact_directory("mcp")?,
         })
     }
 
@@ -213,6 +213,9 @@ impl Coordinator {
         }
         if options.no_network.unwrap_or(false) {
             command.arg("--no-network");
+        }
+        if let Some(path) = options.shared_dir {
+            command.arg("--shared-dir").arg(path);
         }
         match application {
             Application::Command { argv, sandbox } => {
@@ -254,6 +257,8 @@ impl Coordinator {
             width: ready.size[0],
             height: ready.size[1],
             fps: ready.fps,
+            shared_dir: ready.shared_dir,
+            session_dir: ready.session,
         };
         let mut session = Session {
             info: info.clone(),
@@ -340,7 +345,6 @@ impl Coordinator {
         let sequence = self.next_artifact;
         self.next_artifact += 1;
         self.artifacts
-            .path()
             .join(format!("{session}-{sequence}.{extension}"))
     }
 

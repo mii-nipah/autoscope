@@ -43,7 +43,8 @@ pub struct LaunchSession<'a> {
     pub runtime: &'a Path,
     pub wayland_display: &'a OsStr,
     pub xdisplay: u32,
-    pub discard_stdout: bool,
+    pub log: &'a Path,
+    pub shared: &'a Path,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -54,6 +55,9 @@ pub enum Sandbox {
 }
 
 pub fn spawn(spec: LaunchSpec, session: &LaunchSession<'_>, host: &HostSession) -> Result<Child> {
+    let home = session.runtime.join("home");
+    fs::create_dir(&home)?;
+    std::os::unix::fs::symlink(session.shared, home.join("Shared"))?;
     match spec {
         LaunchSpec::Flatpak {
             app_id,
@@ -80,7 +84,6 @@ fn spawn_flatpak(
         .file_name()
         .context("instance runtime has no name")?;
     let home = session.runtime.join("home");
-    fs::create_dir(&home)?;
     if app_id == "com.google.Chrome" {
         fs::create_dir_all(home.join("config/google-chrome"))?;
         fs::create_dir_all(session.runtime.join("app/com.google.Chrome"))?;
@@ -108,6 +111,8 @@ fn spawn_flatpak(
         command.arg("--share=network");
     }
     command
+        .arg(format!("--filesystem={}:rw", session.shared.display()))
+        .arg(format!("--env=AUTOSCOPE_SHARED_DIR={}", session.shared.display()))
         .arg(format!(
             "--filesystem=xdg-run/{}",
             runtime_name.to_string_lossy()
@@ -132,11 +137,7 @@ fn spawn_flatpak(
         .env("WAYLAND_DISPLAY", &host.wayland_display)
         .env("DISPLAY", &display)
         .env_remove("XAUTHORITY");
-    spawn_child(
-        command,
-        session.discard_stdout,
-        "launch Flatpak application",
-    )
+    spawn_child(command, session.log, "launch Flatpak application")
 }
 
 fn flatpak_compat_args(app_id: &str, args: &[OsString]) -> Vec<OsString> {
@@ -188,17 +189,17 @@ fn spawn_command(
         let mut command = Command::new(program);
         command
             .args(&argv[1..])
+            .env("AUTOSCOPE_SHARED_DIR", session.shared)
             .env("XDG_RUNTIME_DIR", session.runtime)
             .env("WAYLAND_DISPLAY", session.wayland_display)
             .env("DISPLAY", format!(":{}", session.xdisplay))
             .env_remove("XAUTHORITY")
             .env_remove("DBUS_SESSION_BUS_ADDRESS");
-        return spawn_child(command, session.discard_stdout, "launch application");
+        return spawn_child(command, session.log, "launch application");
     }
 
     let cwd = env::current_dir()?;
     let home = session.runtime.join("home");
-    fs::create_dir(&home)?;
     let x_socket = PathBuf::from(format!("/tmp/.X11-unix/X{}", session.xdisplay));
     if !fs::metadata(&x_socket)?.file_type().is_socket() {
         bail!("private X11 display socket is not a socket");
@@ -242,8 +243,14 @@ fn spawn_command(
         .arg("--ro-bind")
         .arg(&x_socket)
         .arg(&x_socket)
+        .arg("--bind")
+        .arg(session.shared)
+        .arg(session.shared)
         .args(["--chdir", "/work"])
         .args(["--setenv", "HOME", "/home/agent"])
+        .arg("--setenv")
+        .arg("AUTOSCOPE_SHARED_DIR")
+        .arg(session.shared)
         .args(["--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin"])
         .arg("--setenv")
         .arg("XDG_RUNTIME_DIR")
@@ -264,13 +271,19 @@ fn spawn_command(
         command.arg("--share-net");
     }
     command.arg("--").arg(program).args(&argv[1..]);
-    spawn_child(command, session.discard_stdout, "launch bwrap application")
+    spawn_child(command, session.log, "launch bwrap application")
 }
 
-fn spawn_child(mut command: Command, discard_stdout: bool, context: &'static str) -> Result<Child> {
-    if discard_stdout {
-        command.stdout(Stdio::null());
-    }
+fn spawn_child(mut command: Command, log: &Path, context: &'static str) -> Result<Child> {
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .context("open application log")?;
+    command
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .stdin(Stdio::null());
     command.spawn().context(context)
 }
 

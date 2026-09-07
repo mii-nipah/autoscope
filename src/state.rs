@@ -2,6 +2,7 @@ use std::{
     ffi::OsString,
     io::Write,
     os::unix::net::{UnixListener, UnixStream},
+    os::unix::process::ExitStatusExt,
     process::Child,
     sync::{Arc, mpsc::Receiver},
     time::Instant,
@@ -42,6 +43,7 @@ use smithay::{
 use crate::{
     control::{self, Envelope, Recorder, RecordingMode, Request, Response, Viewer},
     cursor,
+    session::{self, ExitReason},
     x11::X11State,
 };
 
@@ -65,6 +67,7 @@ pub struct Autoscope {
     pub pointer: Point<f64, Logical>,
     pub app: Option<Child>,
     pub viewer: Option<Viewer>,
+    pub(crate) exit_reason: Option<ExitReason>,
     control_rx: Receiver<Envelope>,
     stream_listener: UnixListener,
     streams: Vec<UnixStream>,
@@ -127,6 +130,7 @@ impl Autoscope {
             pointer: Point::from((f64::from(size.0) / 2.0, f64::from(size.1) / 2.0)),
             app: None,
             viewer: None,
+            exit_reason: None,
             control_rx,
             stream_listener,
             streams: Vec::new(),
@@ -222,6 +226,7 @@ impl Autoscope {
                 .and_then(|_| self.key_combo(&combo))
                 .map(|_| json!({"key": combo})),
             Request::Wait { .. } => Err("wait is handled by the control coordinator".into()),
+            Request::Drag { .. } => Err("drag is handled by the control coordinator".into()),
             Request::Screenshot { path } => self
                 .screenshot(&path)
                 .map(|_| json!({"path": path, "frame": self.frame_seq, "view": self.view_seq})),
@@ -242,7 +247,7 @@ impl Autoscope {
                 }),
             Request::RecordStop => self.stop_recording().map(|result| json!(result)),
             Request::Quit => {
-                self.loop_signal.stop();
+                self.stop(ExitReason::Requested);
                 Ok(json!({"stopping": true}))
             }
         };
@@ -422,14 +427,23 @@ impl Autoscope {
     }
 
     pub fn poll_app(&mut self) {
+        if let Some(reason) = session::received_signal() {
+            self.stop(reason);
+            return;
+        }
         match self.app.as_mut().map(Child::try_wait) {
             Some(Ok(Some(status))) => {
                 tracing::info!(%status, "application exited");
-                self.loop_signal.stop();
+                self.stop(ExitReason::Application {
+                    code: status.code(),
+                    signal: status.signal(),
+                });
             }
             Some(Err(error)) => {
                 tracing::error!(%error, "failed to poll application");
-                self.loop_signal.stop();
+                self.stop(ExitReason::Error {
+                    message: error.to_string(),
+                });
             }
             _ => {}
         }
@@ -464,9 +478,21 @@ impl Autoscope {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
+
+    pub(crate) fn stop(&mut self, reason: ExitReason) {
+        self.exit_reason.get_or_insert(reason);
+        self.loop_signal.stop();
+    }
 }
 
-fn pointer_coordinates(
+impl Drop for Autoscope {
+    fn drop(&mut self) {
+        self.shutdown();
+        crate::x11::stop(self);
+    }
+}
+
+pub(crate) fn pointer_coordinates(
     size: (i32, i32),
     x: f64,
     y: f64,

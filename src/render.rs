@@ -83,7 +83,9 @@ pub fn install(
                 Ok(frame) => state.publish_frame(frame),
                 Err(error) => {
                     tracing::error!(%error, "render failed");
-                    state.loop_signal.stop();
+                    state.stop(crate::session::ExitReason::Error {
+                        message: format!("render failed: {error}"),
+                    });
                 }
             }
             state.space.elements().for_each(|window| {

@@ -13,7 +13,7 @@ An agent only needs this lifecycle:
 3. Optionally consume the returned `stream` socket or request `--window` for live visualization.
 4. Send `quit` when finished.
 
-The ready JSON deliberately contains only operational session facts: process IDs, `control`, `stream`, size, and frame rate. Backend display names, runtime directories, renderer state, and application-profile plumbing are private implementation details.
+The ready JSON contains operational session facts: process IDs, `control`, `stream`, size, frame rate, a durable `session` directory, `shared_dir`, and `log`. Backend display names and renderer plumbing remain private implementation details.
 
 ## Build
 
@@ -43,7 +43,9 @@ For host commands, `--sandbox auto` uses bwrap when present, `--sandbox bwrap` r
 
 ## File choosers
 
-Toolkit-native Wayland and X11 choosers render inside the session. Flatpak Chrome also falls back to its in-process GTK chooser because host desktop portals and bus sockets are unavailable. Choosers see only the application's sandbox: a private home plus the explicitly exposed read-only `/work` tree for bwrap commands. They cannot open a dialog on the host desktop.
+Toolkit-native Wayland and X11 choosers render inside the session. Flatpak Chrome also falls back to its in-process GTK chooser because host desktop portals and bus sockets are unavailable. Each session now shares one writable folder with its application at the same absolute host path. Use `--shared-dir /path/to/art` or the private default reported as `shared_dir`; copy inputs into it and save outputs there. Sandboxed apps also have `$HOME/Shared` and `AUTOSCOPE_SHARED_DIR`. The bwrap `/work` mount remains read-only. Choosers cannot open a dialog on the host desktop.
+
+Shared files, logs, and metadata survive session exit under `$XDG_STATE_HOME/autoscope/sessions` by default. `autoscope run --detach` starts a session independently of the launching terminal; `autoscope status SESSION` inspects it and `autoscope attach SESSION` opens a read-only live viewer. Use the returned `control` socket to stop it with `quit`. Signals received by Autoscope request graceful shutdown and record their number and sender; an unrecorded exit is reported as unreachable rather than assigned an invented cause.
 
 ## Automate
 
@@ -79,6 +81,8 @@ Input is safe-paced by default. Only one input step is injected per rendered fra
 
 `move` and coordinate-bearing `click` use absolute frame pixels by default. Add `--normalize` to interpret both axes as `0.0..=1.0`; the endpoints map exactly to the first and last frame pixels. Direct socket clients use the same wire option, for example `{"cmd":"move","x":0.5,"y":0.5,"normalize":true}`. Values outside the normalized range are rejected.
 
+For a whole drawing gesture, use `autoscope ctl "$CONTROL" drag 300,200 400,250 700,500`. It validates the entire path, sends one vertex per frame with the button held, releases, and settles once. `drag --origin 235,149 --scale 4 10,10 20,20` maps local canvas pixels to screen coordinates. This avoids one process and one stability wait per vertex. Intermediate failure still releases the held button.
+
 Recording FPS is independent from the session FPS: a session and its viewer may remain at 60 FPS while evidence is sampled at 1 FPS. Omitting recording `--fps` preserves the old behavior by using the session FPS; a recording cannot request more frames than the session produces. `--mode images` creates chronological contact-sheet PNGs instead of a video, ordered left-to-right and then top-to-bottom. Each sampled frame is immediately reduced to at most 320 pixels wide, and `--frames-per-image` accepts 1 through 10 thumbnails per sheet, keeping both images and memory compact.
 
 ## MCP coordinator
@@ -92,6 +96,8 @@ Recording FPS is independent from the session FPS: a session and its viewer may 
 The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos or contact sheets, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn allows up to five seconds for its first window to become visually quiet, then returns a short coordinator ID such as `app-1`, its screenshot, and a `view` number. Every input tool requires the `view` from the most recently returned image, waits for visual stability by default, and returns the next screenshot and view. If the screen changed—or another preplanned action already consumed that observation—the stale action is rejected before input injection. This makes the agent observe each state transition instead of blindly replaying coordinates against a newer layout. `start_recording` independently selects `fps` and `mode`; `stop_recording` returns an MP4 path for video mode or chronological contact sheets as MCP image content for models without native video understanding.
 
 One MCP process may own multiple independent sessions. Closing the MCP input gracefully closes and reaps every session and application process it still owns; Linux parent-death signaling also prevents a hard-killed coordinator from leaving live session children. Absolute pointer pixels remain the default, and MCP input tools accept `normalize: true` for `0.0..=1.0` coordinates.
+
+Spawn options accept `shared_dir`, and each observation reports that folder. The `drag` tool takes `points: [[x,y], ...]`, optional `origin` and `scale`, and the latest `view`; it returns the existing post-action screenshot and stale-view safeguards. The coordinator's recordings are retained after server exit. Detached CLI sessions are explicit; MCP-owned sessions still close with their coordinator.
 
 ## Realtime frame feed
 
@@ -115,7 +121,7 @@ Each frame is an increasing `u64` sequence followed by exactly `frame byte lengt
 
 Autoscope is implemented as a one-application nested Wayland compositor using Smithay's headless Pixman renderer and one rootless XWayland server. Smithay is pinned to commit `92ba0e92c2f8e775cc61a17bdf8a68e122c15610`. X11 windows become ordinary Smithay `Window` elements, so both protocols share one output, one seat, one SVG-derived arrow cursor, and one canonical RGBA frame. Screenshots, recording, streaming, and the optional viewer all consume that frame. Host mouse and keyboard events are never admitted; only control-socket commands enter Smithay's seat.
 
-The bwrap profile exposes `/usr`, `/etc`, and `/sys` read-only, an isolated home and `/tmp`, the current working tree read-only at `/work`, the session runtime directory, and exactly one private X11 socket. It omits host displays, session bus, audio sockets, and input devices. Flatpak launch resets manifest permissions with `--sandbox`, then admits only optional network access, DRI rendering, the private displays, and the private session directory. Host session/system bus and document-portal sockets are absent. Chrome runs its real binary directly with its nested process sandbox disabled because the complete browser process tree remains inside that outer Flatpak sandbox; this also avoids its host-portal-dependent wrapper.
+The bwrap profile exposes `/usr`, `/etc`, and `/sys` read-only, an isolated home and `/tmp`, the current working tree read-only at `/work`, the session runtime directory, exactly one private X11 socket, and the shared file directory read/write. It omits host displays, session bus, audio sockets, and input devices. Flatpak launch resets manifest permissions with `--sandbox`, then admits only optional network access, DRI rendering, the private displays, the private session directory, and the chosen shared folder. Host session/system bus and document-portal sockets are absent. Chrome runs its real binary directly with its nested process sandbox disabled because the complete browser process tree remains inside that outer Flatpak sandbox; this also avoids its host-portal-dependent wrapper.
 
 The current compatibility boundary is Linux applications using native Wayland or X11 through XWayland and shared-memory presentation. There is intentionally no desktop shell, host portal bridge, manual-input bridge, clipboard bridge, audio bridge, or remote network protocol.
 

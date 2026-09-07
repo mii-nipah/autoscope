@@ -318,6 +318,8 @@ impl XwmHandler for Autoscope {
 
     fn disconnected(&mut self, _xwm: XwmId) {
         tracing::error!("private XWayland server disconnected");
-        self.loop_signal.stop();
+        self.stop(crate::session::ExitReason::Error {
+            message: "private XWayland server disconnected".into(),
+        });
     }
 }

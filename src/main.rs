@@ -5,6 +5,7 @@ mod input;
 mod launch;
 mod mcp;
 mod render;
+mod session;
 mod state;
 mod x11;
 
@@ -40,6 +41,10 @@ enum Command {
     Readme,
     /// Run one application inside a private automation session.
     Run(RunArgs),
+    /// Inspect a running or exited session using its durable session directory.
+    Status { session: PathBuf },
+    /// Open a read-only viewer of an existing session.
+    Attach { session: PathBuf },
     /// Send one automation command to an instance.
     Ctl(CtlArgs),
     /// Copy the realtime ASF1 frame stream to stdout.
@@ -66,6 +71,15 @@ struct RunArgs {
     /// Remove network access from the application sandbox.
     #[arg(long)]
     no_network: bool,
+    /// A host folder shared read/write at the same absolute path inside the app.
+    /// Defaults to a durable, private folder reported in the ready response.
+    #[arg(long)]
+    shared_dir: Option<PathBuf>,
+    /// Keep the session running after this command exits; return its ready JSON.
+    #[arg(long, conflicts_with_all = ["coordinator", "session_dir"])]
+    detach: bool,
+    #[arg(long, hide = true)]
+    session_dir: Option<PathBuf>,
     /// Launch a Flatpak app ID. Arguments after -- are passed to the app.
     #[arg(long)]
     flatpak: Option<String>,
@@ -131,6 +145,13 @@ enum CtlCommand {
     MouseDown {
         #[arg(default_value = "left")]
         button: String,
+    },
+    /// Draw or drag through a complete path; settle once after releasing the button.
+    Drag {
+        #[command(flatten)]
+        path: control::DragPath,
+        #[arg(long)]
+        no_wait: bool,
     },
     MouseUp {
         #[arg(default_value = "left")]
@@ -203,6 +224,11 @@ fn main() -> Result<()> {
             .write_all(COMMAND_GUIDE.as_bytes())
             .context("write command guide"),
         Command::Run(args) => run(args),
+        Command::Status { session } => {
+            println!("{}", session::status(&session)?);
+            Ok(())
+        }
+        Command::Attach { session } => control::Viewer::attach(&session),
         Command::Ctl(args) => ctl(args),
         Command::Stream { socket } => control::stream_to_stdout(&socket),
         Command::Mcp => mcp::run(),
@@ -211,6 +237,22 @@ fn main() -> Result<()> {
 
 fn run(args: RunArgs) -> Result<()> {
     validate_run_args(&args)?;
+    let files = match &args.session_dir {
+        Some(path) => session::Files::reopen(path.clone())?,
+        None => session::Files::create(&args.name, args.shared_dir.as_deref())?,
+    };
+    let result = if args.detach {
+        session::detach(&files)
+    } else {
+        session::install_signals().and_then(|_| run_session(args, &files))
+    };
+    if let Err(error) = &result {
+        let _ = files.update(json!({"status": "failed", "error": format!("{error:#}")}));
+    }
+    result
+}
+
+fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
     let host = HostSession::capture()?;
     let runtime = tempfile::Builder::new()
         .prefix(&format!("autoscope-{}-", safe_name(&args.name)))
@@ -261,7 +303,8 @@ fn run(args: RunArgs) -> Result<()> {
             runtime: runtime.path(),
             wayland_display: &state.socket_name,
             xdisplay,
-            discard_stdout: args.coordinator,
+            log: &files.root.join("session.log"),
+            shared: &files.shared,
         },
         &host,
     )?;
@@ -277,18 +320,16 @@ fn run(args: RunArgs) -> Result<()> {
         )?);
     }
 
-    println!(
-        "{}",
-        json!({
-            "status": "ready",
-            "pid": std::process::id(),
-            "app_pid": child_pid,
-            "control": control_path,
-            "stream": stream_path,
-            "size": [args.width, args.height],
-            "fps": args.fps,
-        })
-    );
+    let ready = files.update(json!({
+        "status": "ready",
+        "pid": std::process::id(),
+        "app_pid": child_pid,
+        "control": control_path,
+        "stream": stream_path,
+        "size": [args.width, args.height],
+        "fps": args.fps,
+    }))?;
+    println!("{ready}");
     io::stdout().flush()?;
 
     let result = event_loop.run(None, &mut state, |_| {});
@@ -297,6 +338,7 @@ fn run(args: RunArgs) -> Result<()> {
     let cleanup = cleanup_runtime(runtime.path());
     result?;
     cleanup?;
+    files.update(json!({"status": "exited", "exit": state.exit_reason}))?;
     Ok(())
 }
 
@@ -317,6 +359,11 @@ fn cleanup_runtime(path: &std::path::Path) -> Result<()> {
 fn ctl(args: CtlArgs) -> Result<()> {
     let request = match args.command {
         CtlCommand::Info => Request::Info,
+        CtlCommand::Drag { path, no_wait } => Request::Drag {
+            path,
+            wait: !no_wait,
+            view: None,
+        },
         CtlCommand::Move {
             x,
             y,
@@ -434,7 +481,10 @@ fn safe_name(name: &str) -> String {
 fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "autoscope=info,warn".into());
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_env_filter(filter)
+        .init();
 }
 
 #[cfg(test)]
@@ -465,7 +515,7 @@ mod tests {
             for option in command
                 .get_arguments()
                 .filter_map(|argument| argument.get_long())
-                .filter(|option| *option != "coordinator")
+                .filter(|option| !matches!(*option, "coordinator" | "session-dir"))
             {
                 assert!(
                     COMMAND_GUIDE.contains(&format!("--{option}")),

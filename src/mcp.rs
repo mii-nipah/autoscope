@@ -14,7 +14,7 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::control::{RecordingMode, Request};
+use crate::control::{DragPath, RecordingMode, Request};
 use coordinator::{
     ActionResult, Application, Capture, Coordinator, SandboxMode, SessionInfo, SessionOptions,
 };
@@ -82,6 +82,15 @@ struct ButtonParams {
     button: String,
     /// true presses and holds; false releases.
     pressed: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DragParams {
+    session: String,
+    /// View from the most recent screenshot; checked before the gesture starts.
+    view: u64,
+    #[serde(flatten)]
+    path: DragPath,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -267,8 +276,11 @@ fn observation_result(action: Option<ActionResult>, capture: Capture) -> CallToo
         .unwrap_or_default();
     let mut result = CallToolResult::success(vec![
         ContentBlock::text(format!(
-            "{session} is at view {} (frame {}).{wait} Use view={} for the next input tool.",
-            capture.view, capture.frame, capture.view,
+            "{session} is at view {} (frame {}).{wait} Use view={} for the next input tool. Shared files: {} (same path on host and in app; retained after exit).",
+            capture.view,
+            capture.frame,
+            capture.view,
+            capture.info.shared_dir.display(),
         )),
         ContentBlock::image(
             base64::engine::general_purpose::STANDARD.encode(capture.bytes),
@@ -378,6 +390,21 @@ impl AutoscopeMcp {
     }
 
     #[tool(
+        description = "Drag through a full path with one held button, then release, settle, and return a screenshot. All points are validated before input. Optional origin and scale map canvas pixels to the screen; for example origin=[235,149], scale=4 for a canvas at 400% zoom."
+    )]
+    fn drag(&self, Parameters(params): Parameters<DragParams>) -> CallToolResult {
+        self.observed_action(
+            &params.session,
+            params.view,
+            Request::Drag {
+                path: params.path,
+                wait: true,
+                view: Some(params.view),
+            },
+        )
+    }
+
+    #[tool(
         description = "Scroll only if the supplied observed view is current, wait for visual stability, and return a new screenshot and view"
     )]
     fn scroll(&self, Parameters(params): Parameters<ScrollParams>) -> CallToolResult {
@@ -474,7 +501,7 @@ impl ServerHandler for AutoscopeMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("autoscope", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Spawn allows bounded visual settling, then returns a screenshot, session ID, and view number. Every input tool requires that latest view, waits for bounded visual stability by default, and returns the resulting screenshot and next view; stale or concurrently planned actions are rejected before injection. Re-read each returned image before choosing another coordinate, and treat wait status timed-out as an instruction to observe or wait again. Text is paced at UI-safe speed. Absolute pixels are the coordinate default; set normalize=true for 0.0 through 1.0. move_pointer wait=false is reserved for drag steps. Recordings select FPS independently, and images mode returns chronological contact sheets. Sessions close automatically when this server exits.",
+                "Spawn allows bounded visual settling, then returns a screenshot, session ID, and view number. Every input tool requires that latest view, waits for bounded visual stability by default, and returns the resulting screenshot and next view; stale or concurrently planned actions are rejected before injection. Re-read each returned image before choosing another coordinate, and treat wait status timed-out as an instruction to observe or wait again. Text is paced at UI-safe speed. Absolute pixels are the coordinate default; set normalize=true for 0.0 through 1.0. Use drag for a whole held-button path, with optional origin and scale for local canvas coordinates; move_pointer wait=false remains available for raw drag steps. Each session reports shared_dir, a writable folder at the same absolute path on host and in the app; place inputs and save exports there. Recordings select FPS independently, and images mode returns chronological contact sheets. Sessions close automatically when this server exits; shared files, logs, and recordings are retained.",
             )
     }
 }
