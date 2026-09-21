@@ -9,7 +9,7 @@
 autoscope runs one Linux application inside its own headless Wayland compositor and gives an agent a socket to see and drive it: screenshots, mouse, keyboard, drag gestures, videos, and contact sheets. Native Wayland and X11 apps share the same interface, the app runs in a bubblewrap or Flatpak sandbox, and your own mouse and keyboard are never touched.
 
 <p align="center">
-  <img src="docs/demo.gif" width="720" alt="An agent typing a new checklist item into Chrome and ticking a box, running inside autoscope">
+  <img src="docs/demo.gif" width="540" alt="An agent drawing a pixel-art cat in Pixelorama and animating it to blink, running inside autoscope">
 </p>
 
 - **One contract for every app.** Start a session, read one JSON line, drive the returned control socket.
