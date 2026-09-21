@@ -44,6 +44,7 @@ shutil.copy2(source / "scripts/packaging/autoscope.desktop", appdir / "autoscope
 shutil.copy2(source / "plugin/autoscope/assets/icon.svg", appdir / "autoscope.svg")
 shutil.copy2(appdir / "autoscope.svg", appdir / ".DirIcon")
 shutil.copy2(source / "LICENSE", appdir / "LICENSE")
+shutil.copy2(source / "NOTICE", appdir / "NOTICE")
 
 packages = {"xkb-data"}
 for path in origins:

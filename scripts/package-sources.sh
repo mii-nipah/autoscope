@@ -11,7 +11,7 @@ podman run --rm --security-opt label=disable \
     -v autoscope-git-cache:/usr/local/cargo/git \
     localhost/autoscope-package:22.04 sh -ec '
         mkdir -p /build/sources/autoscope /build/sources/system /build/sources/autoscope/.cargo
-        cp -R Cargo.toml Cargo.lock LICENSE README.md USAGE.md src scripts plugin tests /build/sources/autoscope/
+        cp -R Cargo.toml Cargo.lock build.rs LICENSE NOTICE README.md USAGE.md assets src scripts plugin tests /build/sources/autoscope/
         cargo vendor --locked --versioned-dirs /build/sources/autoscope/vendor > /build/sources/autoscope/.cargo/config.toml
         sed -i "s|/build/sources/autoscope/vendor|vendor|g" /build/sources/autoscope/.cargo/config.toml
         cp /build/Autoscope.AppDir/build-info.json /build/sources/

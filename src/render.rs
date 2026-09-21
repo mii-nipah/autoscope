@@ -116,7 +116,7 @@ fn draw(
         &mut backend.renderer,
         (state.pointer.x.round(), state.pointer.y.round()),
         &state.cursor,
-        None,
+        Some(crate::cursor::ALPHA),
         None,
         None,
         Kind::Cursor,

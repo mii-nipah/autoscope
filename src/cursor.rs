@@ -5,6 +5,8 @@ use smithay::{
 };
 
 const SIZE: i32 = 28;
+/// Slightly translucent so the content under the pointer stays visible.
+pub(crate) const ALPHA: f32 = 0.85;
 
 pub(crate) fn buffer() -> MemoryRenderBuffer {
     let pixels = rasterize();
@@ -39,12 +41,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_cursor_has_visible_and_transparent_pixels() {
+    fn bundled_cursor_is_a_white_outlined_black_arrow() {
         let pixels = rasterize();
         assert_eq!(pixels.len(), (SIZE * SIZE * 4) as usize);
-        let mut alphas = pixels.chunks_exact(4).map(|pixel| pixel[3]);
-        assert!(alphas.clone().any(|alpha| alpha > 0));
-        assert!(alphas.clone().any(|alpha| alpha == 0));
-        assert!(alphas.any(|alpha| alpha > 0 && alpha < 255));
+        let pixel = |x: i32, y: i32| &pixels[((y * SIZE + x) * 4) as usize..][..4];
+        assert_eq!(pixel(8, 8), [0, 0, 0, 255]);
+        assert!(pixels.chunks_exact(4).any(|p| p == [255, 255, 255, 255]));
+        assert_eq!(pixel(SIZE - 1, SIZE - 1)[3], 0);
     }
 }

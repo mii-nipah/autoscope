@@ -2,7 +2,9 @@
 name = "autoscope"
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+authors = ["nipah~✰!"]
+license = "BSD-3-Clause"
+repository = "https://github.com/mii-nipah/autoscope"
 description = "An isolated application runner and UI automation environment for autonomous agents"
 
 [dependencies]

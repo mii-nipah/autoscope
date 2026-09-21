@@ -1,140 +1,164 @@
+<div align="center">
+
 # autoscope
 
-`autoscope` runs one Linux application in an isolated UI automation session for autonomous agents. Native Wayland and X11 applications use the same control and capture interface; a normal agent does not configure displays, choose a renderer, manage application profiles, or understand compositor protocols.
+**Eyes and hands for autonomous agents, inside a private Linux app.**
 
-Run `autoscope readme` for the complete standalone command guide.
+</div>
 
-## Codex plugin
+autoscope runs one Linux application inside its own headless Wayland compositor and gives an agent a socket to see and drive it: screenshots, mouse, keyboard, drag gestures, videos, and contact sheets. Native Wayland and X11 apps share the same interface, the app runs in a bubblewrap or Flatpak sandbox, and your own mouse and keyboard are never touched.
 
-The [Autoscope plugin](plugin/autoscope/README.md) bundles a prebuilt Linux runtime, libraries, keyboard data, bubblewrap, FFmpeg, the MCP connection, and a skill for visual app workflows. Install it in Codex, start a new task, and ask **“Open my app in Autoscope, test its main workflow, and show me the result.”** No compilation, setup command, or manual MCP configuration is needed.
+<p align="center">
+  <img src="docs/demo.gif" width="720" alt="An agent typing a new checklist item into Chrome and ticking a box, running inside autoscope">
+</p>
 
-Maintainers build with `scripts/build-bundle.sh` (Podman), then `python3 scripts/package-plugin.py` (Python and appimagetool). The plugin archive, standalone AppImage, and SHA-256 checksums appear in `target/plugin/`. Both use the same runtime built on Ubuntu 22.04; this package supports Linux x86_64 with glibc 2.35 or newer. Xwayland is an optional host dependency for X11 apps, and Flatpak is needed only for Flatpak apps. Recipients do not need the build tools.
+- **One contract for every app.** Start a session, read one JSON line, drive the returned control socket.
+- **Observe, then act.** Each input waits for the screen to settle and reports the frame it produced. The MCP server rejects actions planned against a stale screenshot.
+- **Evidence built in.** PNG screenshots, MP4 recordings, contact sheets for image-only models, and a raw realtime frame stream.
+- **Isolated by default.** Private displays, a private home, a read-only project mount, one shared folder, and optional network removal.
+- **Agent-ready.** A stdio MCP server, plus a prebuilt Codex plugin that needs no setup step.
 
-The maintained plugin files live in `plugin/autoscope/`; packaging adds `runtime/` from the generated AppDir. Register the extracted `autoscope` folder with a Codex marketplace or share its plugin card. The plugin runs from the extracted AppDir without FUSE. The standalone AppImage accepts the same CLI commands; use `--appimage-extract-and-run` if FUSE is unavailable. Building an archive does not publish it to the public plugin directory.
+## Contents
 
-`scripts/package-sources.sh` prepares a separate `target/plugin/autoscope-sources.tar.gz` for distribution alongside the binaries. It includes this project's source and build scripts, vendored Rust dependencies, and exact Ubuntu source packages with their patches and SHA-256 verification. Component notices and package versions are included in each runtime. These companion sources are for rebuilding or redistribution; users do not need to download them to run the plugin.
+- [Quick start](#quick-start)
+- [Driving it from an agent](#driving-it-from-an-agent)
+- [Codex plugin](#codex-plugin)
+- [How it works](#how-it-works)
+- [Building the portable runtime](#building-the-portable-runtime)
+- [Contributing](#contributing)
+- [Related projects](#related-projects)
+- [License](#license)
 
-To verify an extracted or installed package, run `python3 tests/plugin_workflow.py /path/to/autoscope --artifacts target/plugin-evidence` with Flatpak Chrome, Xmessage, and Xwayland installed. It checks a real project working directory under a read-only `/work` mount, offline X11 launch, browser typing and form submission, stale-input rejection, contact-sheet capture, and session cleanup. `python3 tests/portable_workflow.py /path/to/autoscope --artifacts target/native-evidence` uses Zenity to verify native Wayland input, exact saved bytes, and bundled video encoding/decoding with Xwayland absent from PATH and no host display environment. Both omit `XDG_RUNTIME_DIR`, as Codex can do. `python3 tests/codex_plugin_workflow.py /path/to/autoscope --codex /path/to/codex --artifacts target/codex-evidence` exercises the installed `autoscope@personal` plugin through Codex's real tool-call API using an ephemeral context without a model turn. [Plugin troubleshooting](plugin/autoscope/README.md#troubleshooting-and-manual-use) records the current networked X11 limitation.
+## Quick start
 
-## Agent contract
-
-An agent only needs this lifecycle:
-
-1. Start `autoscope run` and read its first JSON line.
-2. Use the returned `control` socket for mouse, keyboard, screenshots, and recording.
-3. Optionally consume the returned `stream` socket or request `--window` for live visualization.
-4. Send `quit` when finished.
-
-The ready JSON contains operational session facts: process IDs, `control`, `stream`, size, frame rate, a durable `session` directory, `shared_dir`, and `log`. Backend display names and renderer plumbing remain private implementation details.
-
-## Build
+You need Linux, a recent stable Rust toolchain, `pkg-config`, and the xkbcommon and pixman development headers (`libxkbcommon-devel pixman-devel` on Fedora, `libxkbcommon-dev libpixman-1-dev` on Debian and Ubuntu).
 
 ```bash
+git clone https://github.com/mii-nipah/autoscope
+cd autoscope
 cargo build --release
 ```
 
-## Run an application
-
-Host command, isolated with bwrap by default when `bwrap` is installed:
+Start an application. `run` prints one JSON line once the session is ready, and `--detach` gives your terminal back:
 
 ```bash
-autoscope run --name my-app -- ./target/debug/my-app
+./target/release/autoscope run --detach --name hello -- zenity --entry --text "What should the agent say?"
 ```
-
-Each session supplies a private Wayland display and, when Xwayland is available, a private X11 display. Native Wayland apps work without Xwayland or a host Wayland display. Toolkits choose an available protocol without changing the agent contract.
-
-Flatpak Chrome needs only the application ID and normal Chrome arguments; autoscope supplies its compatibility, permission-reset sandbox, and profile isolation internally:
-
-```bash
-autoscope run --name chrome --flatpak com.google.Chrome -- https://www.google.com/
-```
-
-`--window` opens a small read-only viewer of the same frames used for capture. Viewer input never reaches the application.
-
-For host commands, `--sandbox auto` uses bwrap when present, `--sandbox bwrap` requires it, and `--sandbox off` disables it. Network is shared unless `--no-network` is set; the same flag removes Flatpak network access.
-
-## File choosers
-
-Toolkit-native Wayland and X11 choosers render inside the session. Flatpak Chrome also falls back to its in-process GTK chooser because host desktop portals and bus sockets are unavailable. Each session now shares one writable folder with its application at the same absolute host path. Use `--shared-dir /path/to/art` or the private default reported as `shared_dir`; copy inputs into it and save outputs there. Sandboxed apps also have `$HOME/Shared` and `AUTOSCOPE_SHARED_DIR`. The bwrap `/work` mount remains read-only. Choosers cannot open a dialog on the host desktop.
-
-Shared files, logs, and metadata survive session exit under `$XDG_STATE_HOME/autoscope/sessions` by default. `autoscope run --detach` starts a session independently of the launching terminal; `autoscope status SESSION` inspects it and `autoscope attach SESSION` opens a read-only live viewer. Use the returned `control` socket to stop it with `quit`. Signals received by Autoscope request graceful shutdown and record their number and sender; an unrecorded exit is reported as unreachable rather than assigned an invented cause.
-
-## Automate
-
-Assuming `CONTROL` is the `control` path from the ready JSON:
-
-```bash
-autoscope ctl "$CONTROL" move 620 370
-autoscope ctl "$CONTROL" move --normalize 0.5 0.5
-autoscope ctl "$CONTROL" click
-autoscope ctl "$CONTROL" type "smithay compositor"
-autoscope ctl "$CONTROL" key ENTER
-autoscope ctl "$CONTROL" screenshot /tmp/search.png
-
-autoscope ctl "$CONTROL" record-start --fps 1 /tmp/click.mp4
-autoscope ctl "$CONTROL" click --x 620 --y 250
-autoscope ctl "$CONTROL" click --normalize --x 0.5 --y 0.25
-autoscope ctl "$CONTROL" record-stop
-
-autoscope ctl "$CONTROL" record-start --mode images --fps 1 --frames-per-image 10 /tmp/actions.png
-# perform actions, then stop to produce actions-001.png, actions-002.png, ...
-autoscope ctl "$CONTROL" record-stop
-
-autoscope ctl "$CONTROL" scroll 0 640
-autoscope ctl "$CONTROL" key CTRL+L
-autoscope ctl "$CONTROL" wait
-autoscope ctl "$CONTROL" info
-autoscope ctl "$CONTROL" quit
-```
-
-`type` accepts printable US ASCII and validates the complete string before injecting any key. Named keys include navigation keys, F1–F12, Enter, Tab, Escape, Backspace, Delete, and modifier combinations such as `CTRL+L`.
-
-Input is safe-paced by default. Only one input step is injected per rendered frame, `type` sends one validated character at a time, and `click` gives the application real move, dwell, press, and release phases. Move, click, scroll, type, and key commands then wait up to five seconds for significant pixels to remain unchanged for 600 ms. Their JSON result reports `wait.status` as `stable`, `timed-out`, or `unavailable`, together with the resulting `frame` and `view`; a timeout means “observe this frame and decide,” not that the input failed. `autoscope ctl wait` provides the same bounded barrier explicitly. `--no-wait` skips only the visual-stability wait, and is intended for raw gesture steps such as movement during a held-button drag.
-
-`move` and coordinate-bearing `click` use absolute frame pixels by default. Add `--normalize` to interpret both axes as `0.0..=1.0`; the endpoints map exactly to the first and last frame pixels. Direct socket clients use the same wire option, for example `{"cmd":"move","x":0.5,"y":0.5,"normalize":true}`. Values outside the normalized range are rejected.
-
-For a whole drawing gesture, use `autoscope ctl "$CONTROL" drag 300,200 400,250 700,500`. It validates the entire path, sends one vertex per frame with the button held, releases, and settles once. `drag --origin 235,149 --scale 4 10,10 20,20` maps local canvas pixels to screen coordinates. This avoids one process and one stability wait per vertex. Intermediate failure still releases the held button.
-
-Recording FPS is independent from the session FPS: a session and its viewer may remain at 60 FPS while evidence is sampled at 1 FPS. Omitting recording `--fps` preserves the old behavior by using the session FPS; a recording cannot request more frames than the session produces. `--mode images` creates chronological contact-sheet PNGs instead of a video, ordered left-to-right and then top-to-bottom. Each sampled frame is immediately reduced to at most 320 pixels wide, and `--frames-per-image` accepts 1 through 10 thumbnails per sheet, keeping both images and memory compact.
-
-## MCP coordinator
-
-`autoscope mcp` is a stdio MCP server for agents that should not manage application-session processes or socket paths themselves. Configure an MCP client to launch:
 
 ```json
-{"command":"autoscope","args":["mcp"]}
+{"app_pid":4242,"control":"/run/user/1000/autoscope-hello-XXXX/control.sock","fps":15,"log":"/home/you/.local/state/autoscope/sessions/hello-XXXX/session.log","pid":4240,"session":"/home/you/.local/state/autoscope/sessions/hello-XXXX","shared_dir":"/home/you/.local/state/autoscope/sessions/hello-XXXX/files","size":[1280,800],"status":"ready","stream":"/run/user/1000/autoscope-hello-XXXX/stream.sock"}
 ```
 
-The coordinator exposes tools to spawn host commands or Flatpak applications, list and inspect sessions, move/click/scroll, hold mouse buttons for drags, type text, press keys, capture screenshots, record MP4 videos or contact sheets, and close sessions. A host command is passed as an argument array without shell interpretation. Spawn allows up to five seconds for its first window to become visually quiet, then returns a short coordinator ID such as `app-1`, its screenshot, and a `view` number. Every input tool requires the `view` from the most recently returned image, waits for visual stability by default, and returns the next screenshot and view. If the screen changed—or another preplanned action already consumed that observation—the stale action is rejected before input injection. This makes the agent observe each state transition instead of blindly replaying coordinates against a newer layout. `start_recording` independently selects `fps` and `mode`; `stop_recording` returns an MP4 path for video mode or chronological contact sheets as MCP image content for models without native video understanding.
-
-One MCP process may own multiple independent sessions. Closing the MCP input gracefully closes and reaps every session and application process it still owns; Linux parent-death signaling also prevents a hard-killed coordinator from leaving live session children. Absolute pointer pixels remain the default, and MCP input tools accept `normalize: true` for `0.0..=1.0` coordinates.
-
-Spawn options accept `shared_dir`, and each observation reports that folder. For project applications, `working_dir` selects an absolute working directory and the read-only `/work` mount under bwrap; this works even when an MCP client starts the coordinator in its plugin directory. The `drag` tool takes `points: [[x,y], ...]`, optional `origin` and `scale`, and the latest `view`; it returns the existing post-action screenshot and stale-view safeguards. The coordinator's recordings are retained after server exit. Detached CLI sessions are explicit; MCP-owned sessions still close with their coordinator.
-
-## Realtime frame feed
+Drive it through the `control` socket from that line:
 
 ```bash
-autoscope stream "$STREAM" > frames.asf
+CONTROL=/run/user/1000/autoscope-hello-XXXX/control.sock
+./target/release/autoscope ctl "$CONTROL" type "hello from an agent"
+./target/release/autoscope ctl "$CONTROL" screenshot hello.png
+./target/release/autoscope ctl "$CONTROL" quit
 ```
 
-The stream starts with a fixed 20-byte little-endian header:
+Add `--window` to `run` to watch a read-only live view. Flatpak apps only need their ID, for example `run --flatpak com.google.Chrome -- https://example.com`.
 
-| Offset | Value |
-|---:|---|
-| 0 | ASCII `ASF1` |
-| 4 | width, `u32` |
-| 8 | height, `u32` |
-| 12 | frames per second, `u32` |
-| 16 | RGBA frame byte length, `u32` |
+Every command and option is documented in the [command guide](USAGE.md), which is also built into the binary as `autoscope readme`.
 
-Each frame is an increasing `u64` sequence followed by exactly `frame byte length` top-to-bottom RGBA bytes. Slow readers are disconnected instead of delaying the session.
+### Optional host tools
 
-## Internal architecture
+| Tool | Enables |
+| --- | --- |
+| `bwrap` (bubblewrap) | The filesystem sandbox for host commands, used automatically when installed |
+| Xwayland | X11 applications, detected automatically |
+| FFmpeg (`ffmpeg`, `ffplay`) | MP4 recording and the `--window` live viewer |
+| Flatpak | Launching installed Flatpak applications |
 
-Autoscope is implemented as a one-application Wayland compositor using Smithay's headless Pixman renderer and an optional rootless XWayland server. Smithay is pinned to commit `92ba0e92c2f8e775cc61a17bdf8a68e122c15610`. X11 windows become ordinary Smithay `Window` elements, so both protocols share one output, one seat, one SVG-derived arrow cursor, and one canonical RGBA frame. Screenshots, recording, streaming, and the optional viewer all consume that frame. Host mouse and keyboard events are never admitted; only control-socket commands enter Smithay's seat.
+## Driving it from an agent
 
-The bwrap profile exposes `/usr`, `/etc`, and `/sys` read-only, an isolated home and `/tmp`, the current working tree read-only at `/work`, the session runtime directory, exactly one private X11 socket, and the shared file directory read/write. It omits host displays, session bus, audio sockets, and input devices. Flatpak launch resets manifest permissions with `--sandbox`, then admits only optional network access, DRI rendering, the private displays, the private session directory, and the chosen shared folder. Host session/system bus and document-portal sockets are absent. Chrome runs its real binary directly with its nested process sandbox disabled because the complete browser process tree remains inside that outer Flatpak sandbox; this also avoids its host-portal-dependent wrapper.
+`autoscope mcp` is a stdio [MCP](https://modelcontextprotocol.io) server for agents that shouldn't manage processes or socket paths themselves:
 
-The current compatibility boundary is Linux applications using native Wayland or X11 through XWayland and shared-memory presentation. There is intentionally no desktop shell, host portal bridge, manual-input bridge, clipboard bridge, audio bridge, or remote network protocol.
+```json
+{"command": "autoscope", "args": ["mcp"]}
+```
 
-On minimal Linux systems that ship `libxkbcommon.so.0` or `libpixman-1.so.0` without development symlinks, `build.rs` supplies only the missing local linker aliases.
+Its tools spawn host commands or Flatpaks, click, type, scroll, drag, press keys, and record. Every observation returns a screenshot and a `view` number. Every input tool requires the latest `view` and returns the next screenshot, so an action planned against an outdated screen is rejected before any input happens. One MCP process can own several sessions and closes all of them when its input closes.
+
+Agents that prefer plain processes can use the same lifecycle as the quick start: `run`, read the ready line, send `ctl` commands (or write JSON to the socket directly), then `quit`.
+
+## Codex plugin
+
+[`plugin/autoscope`](plugin/autoscope/README.md) packages autoscope for Codex with a prebuilt Linux x86_64 runtime (glibc 2.35 or newer), its libraries, bubblewrap, FFmpeg, the MCP connection, and a skill for visual app workflows. Install it, start a new task, and ask:
+
+> Open my app in Autoscope, test its main workflow, and show me the result.
+
+No compilation, setup command, or manual MCP configuration is needed.
+
+## How it works
+
+```mermaid
+flowchart LR
+    agent["Agent<br/>CLI, socket, or MCP"] -- "control socket" --> seat
+    subgraph session["autoscope session"]
+        seat["Smithay seat<br/>the only input source"] --> app["Application<br/>Wayland, or X11 via Xwayland<br/>inside bwrap or Flatpak"]
+        app --> compositor["Headless compositor<br/>Pixman renderer + cursor"]
+        compositor --> frame[("One RGBA frame")]
+    end
+    frame --> shots["Screenshots"]
+    frame --> recordings["Videos and contact sheets"]
+    frame --> stream["ASF1 frame stream"]
+    frame --> viewer["Read-only viewer"]
+```
+
+Each session is a one-application Wayland compositor built on [Smithay](https://github.com/Smithay/smithay)'s headless Pixman renderer, with an optional rootless Xwayland server. X11 windows become ordinary Smithay windows, so both protocols share one output, one seat, one cursor, and one canonical frame. Screenshots, recordings, the stream, and the viewer all read that frame. Host input devices are never admitted; only control-socket commands reach the seat.
+
+Under bubblewrap the app sees `/usr`, `/etc`, and `/sys` read-only, a private home and `/tmp`, the launch directory read-only at `/work`, its private displays, and the shared folder read/write. Host displays, the session bus, audio, input devices, and desktop portals stay outside. Flatpak apps are reset with `--sandbox`, then granted only their private displays and session directory, the shared folder, GPU rendering, and network access unless `--no-network` is set.
+
+There is intentionally no desktop shell, portal bridge, clipboard bridge, audio bridge, or remote protocol.
+
+| Module | Responsibility |
+| --- | --- |
+| [`main.rs`](src/main.rs) | CLI and session startup |
+| [`state.rs`](src/state.rs), [`handlers.rs`](src/handlers.rs) | Compositor state and Wayland protocol handlers |
+| [`render.rs`](src/render.rs), [`cursor.rs`](src/cursor.rs) | Headless output, frame rendering, and the SVG cursor |
+| [`x11.rs`](src/x11.rs) | Xwayland integration |
+| [`input.rs`](src/input.rs) | Keyboard and pointer injection |
+| [`launch.rs`](src/launch.rs) | bwrap and Flatpak sandboxes |
+| [`session.rs`](src/session.rs) | Durable session records, detach, and status |
+| [`control/`](src/control.rs) | Control socket, input pacing, visual settling, drags, and viewer |
+| [`mcp/`](src/mcp.rs) | MCP server and session coordinator |
+
+## Building the portable runtime
+
+Maintainers build the portable runtime on an Ubuntu 22.04 base with Podman, then package it with Python and `appimagetool`:
+
+```bash
+scripts/build-bundle.sh
+python3 scripts/package-plugin.py
+scripts/package-sources.sh
+```
+
+`target/plugin/` then holds the Codex plugin archive, a standalone AppImage, their SHA-256 checksums, and a companion source archive with vendored Rust crates and the exact Ubuntu source packages used by the runtime. The AppImage accepts the same CLI commands and `--appimage-extract-and-run` when FUSE is unavailable.
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+- **Bug reports:** include your distribution, whether the app is native Wayland, X11, or Flatpak, the `autoscope run` command, and the session `log` from the ready line. A screenshot from `autoscope ctl … screenshot` helps a lot.
+- **Pull requests:** keep each one focused on one change, and describe the behavior it changes. Run `cargo fmt`, `cargo clippy`, and `cargo test` before opening it.
+- **Sandbox and packaging changes:** also run the end-to-end workflows against a built package. They need Xwayland, Xmessage, Zenity, and Flatpak Chrome.
+
+  ```bash
+  python3 tests/portable_workflow.py /path/to/autoscope --artifacts target/native-evidence
+  python3 tests/plugin_workflow.py /path/to/autoscope --artifacts target/plugin-evidence
+  ```
+
+Be kind and assume good faith. Harassment and personal attacks aren't welcome in issues, pull requests, or anywhere else in the project.
+
+## Related projects
+
+- [Smithay](https://github.com/Smithay/smithay): the Wayland compositor library autoscope is built on
+- [bubblewrap](https://github.com/containers/bubblewrap): the unprivileged sandbox used for host commands
+- [Model Context Protocol](https://modelcontextprotocol.io): the protocol behind `autoscope mcp`
+- [xdotool](https://github.com/jordansissel/xdotool), [ydotool](https://github.com/ReimuNotMoe/ydotool), and [wtype](https://github.com/atx/wtype): input automation for existing X11 or Wayland desktops
+
+## License
+
+autoscope is released under the [BSD 3-Clause License](LICENSE). The arrow cursor is adapted from [Streamline](https://streamlinehq.com)'s Flex icon set under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); see [NOTICE](NOTICE).
