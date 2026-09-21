@@ -1,0 +1,41 @@
+{
+  "name": "autoscope",
+  "version": "0.1.0",
+  "description": "Give Codex eyes and hands inside isolated Linux applications, with screenshots after every action.",
+  "author": {
+    "name": "autoscope contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Autoscope",
+    "shortDescription": "A private Linux app. Eyes and hands for your agent.",
+    "longDescription": "Launch Linux apps in private automation sessions. Codex sees each screen, clicks and types, draws with drag gestures, and captures screenshots, videos, or contact sheets. Your mouse and keyboard stay yours. Includes a prebuilt Linux x86_64 runtime, libraries, sandbox, and recording helpers: no compilation or setup command. Xwayland is optional for X11 apps; Flatpak is optional for Flatpak apps. Requires glibc 2.35 or newer.",
+    "developerName": "autoscope contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Open my Linux app in Autoscope and show me its screen.",
+      "Test my Linux app and capture the full workflow.",
+      "Open a Flatpak app in a private Autoscope session."
+    ],
+    "brandColor": "#0D9488",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg"
+  },
+  "mcpServers": "./.mcp.json",
+  "license": "MIT",
+  "keywords": [
+    "linux",
+    "wayland",
+    "x11",
+    "flatpak",
+    "gui",
+    "automation",
+    "testing",
+    "screenshots"
+  ]
+}

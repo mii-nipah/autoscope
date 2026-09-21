@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "autoscope": {
+      "command": "./runtime/AppRun",
+      "args": ["mcp"],
+      "cwd": "."
+    }
+  }
+}

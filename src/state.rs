@@ -119,7 +119,7 @@ impl Autoscope {
             compositor_state,
             xdg_shell_state,
             xwayland_shell_state,
-            x11: X11State::Starting,
+            x11: X11State::Stopped,
             shm_state,
             _output_manager_state: output_manager_state,
             seat_state,

@@ -283,7 +283,12 @@ fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
         args.fps,
     );
     render::install(&mut event_loop, &mut state, backend, args.fps)?;
-    let xdisplay = x11::start(&mut event_loop, &mut state)?;
+    let xdisplay = if launch::which("Xwayland").is_some() {
+        Some(x11::start(&mut event_loop, &mut state)?)
+    } else {
+        tracing::info!("Xwayland is not installed; running with native Wayland support");
+        None
+    };
 
     let spec = match args.flatpak {
         Some(app_id) => LaunchSpec::Flatpak {

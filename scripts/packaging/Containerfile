@@ -1,0 +1,10 @@
+FROM docker.io/library/rust:1-bookworm@sha256:510c9199edebf02aacc5df8628c84728f9fd1085aa0c1c50c829b284f302faad AS rust
+FROM docker.io/library/ubuntu:22.04@sha256:79676deb51ebb02885b0b9d33788e78a37cf1045ad79d1bb04c6a222c3556b3d
+COPY --from=rust /usr/local/cargo /usr/local/cargo
+COPY --from=rust /usr/local/rustup /usr/local/rustup
+ENV PATH="/usr/local/cargo/bin:${PATH}" RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo CARGO_BUILD_JOBS=4
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential pkg-config libxkbcommon-dev libpixman-1-dev \
+    bubblewrap ffmpeg xkb-data patchelf python3 ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /source

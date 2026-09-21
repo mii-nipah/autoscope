@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Autoscope
+Comment=Private Linux application sessions for autonomous agents
+Exec=autoscope
+Icon=autoscope
+Terminal=true
+Categories=Development;Utility;

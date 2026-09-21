@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+[ "$(uname -s)" = Linux ] || { echo 'Autoscope requires Linux.' >&2; exit 1; }
+[ "$(uname -m)" = "$(cat "$app_dir/architecture")" ] || {
+    echo 'This Autoscope package was built for a different CPU architecture.' >&2; exit 1;
+}
+export PATH="$app_dir/usr/bin:$PATH"
+export XKB_CONFIG_ROOT="$app_dir/usr/share/X11/xkb"
+[ "$#" -gt 0 ] || set -- --help
+if [ "$1" = doctor ]; then
+    "$app_dir/usr/bin/autoscope" --version
+    printf 'Runtime, libraries, keyboard data, bubblewrap, ffmpeg and ffplay: bundled\n'
+    if command -v Xwayland >/dev/null 2>&1; then
+        printf 'Xwayland: available; native Wayland and X11 apps supported\n'
+    else
+        printf 'Xwayland: absent; native Wayland apps supported\n'
+    fi
+    if command -v flatpak >/dev/null 2>&1; then
+        printf 'Flatpak: available\n'
+    else
+        printf 'Flatpak: absent; install it only to run Flatpak applications\n'
+    fi
+    exit 0
+fi
+exec "$app_dir/usr/bin/autoscope" "$@"

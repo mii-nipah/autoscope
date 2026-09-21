@@ -76,7 +76,12 @@ impl Viewer {
             .args(["-y", &height.min(500).to_string()])
             .args(["-window_title", &format!("autoscope — {name}")])
             .env("XDG_RUNTIME_DIR", &host.runtime_dir)
-            .env("WAYLAND_DISPLAY", &host.wayland_display)
+            .env_remove("WAYLAND_DISPLAY")
+            .envs(
+                host.wayland_display
+                    .as_ref()
+                    .map(|value| ("WAYLAND_DISPLAY", value)),
+            )
             .env_remove("DISPLAY")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

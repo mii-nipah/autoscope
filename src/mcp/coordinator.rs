@@ -36,6 +36,8 @@ pub(super) struct SessionOptions {
     no_network: Option<bool>,
     /// Host folder shared read/write with the app; defaults to a durable private folder.
     shared_dir: Option<PathBuf>,
+    /// Absolute application working directory; also mounted read-only at /work under bwrap.
+    working_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -197,6 +199,12 @@ impl Coordinator {
         self.next_session += 1;
         let name = options.name.unwrap_or_else(|| session_id.clone());
         let mut command = Command::new(env::current_exe().context("locate autoscope executable")?);
+        if let Some(path) = options.working_dir {
+            if !path.is_absolute() {
+                bail!("working_dir must be an absolute directory path");
+            }
+            command.current_dir(path.canonicalize().context("resolve working_dir")?);
+        }
         command
             .arg("run")
             .arg("--coordinator")

@@ -2,6 +2,8 @@
 
 Autoscope runs one Wayland or X11 application in a private automation session. Start a session, read its ready line, use the returned control socket, then quit it.
 
+Xwayland is detected automatically and is only needed for X11 applications. Native Wayland applications also work without a host Wayland display. If `XDG_RUNTIME_DIR` is missing or empty, Autoscope uses the existing `/run/user/<uid>` directory; an explicit runtime directory is honored. The selected directory must belong to the current user and have mode `0700`. The binary plugin and AppImage include libraries, keyboard data, bubblewrap, and FFmpeg helpers. Use `runtime/AppRun` or the AppImage path in place of `autoscope` in the commands below. The AppImage also accepts `--appimage-extract-and-run` when FUSE is unavailable.
+
 Print this guide with `autoscope readme`.
 
 ## Start a session

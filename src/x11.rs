@@ -27,7 +27,6 @@ use smithay::{
 use crate::state::Autoscope;
 
 pub enum X11State {
-    Starting,
     Ready { _server: XWayland, wm: Box<X11Wm> },
     Stopped,
 }
