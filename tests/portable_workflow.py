@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify native GUI input, export and bundled video without Xwayland or a host display."""
+"""Verify native GUI input, export and bundled video without host display helpers."""
 import argparse
 import json
 import os
@@ -34,7 +34,6 @@ def main():
         fixture = root / "launch.sh"
         fixture.write_text('''#!/bin/sh
 set -eu
-[ -z "${DISPLAY:-}" ]
 [ "$PWD" = /work ]
 [ ! -w . ]
 value=$(/usr/bin/zenity --entry --title="Autoscope native Wayland" --text="Enter verification text:")
@@ -70,7 +69,7 @@ exec /usr/bin/zenity --info --title="Autoscope verified" --text="Saved: $value"
             assert decode.returncode == 0, decode.stderr
             mcp.tool("close_session", session=session)
             assert mcp.tool("list_sessions")["structuredContent"]["sessions"] == []
-            report = {"xwayland_on_server_path": False, "host_display_environment": False,
+            report = {"host_xwayland_on_path": False, "bundled_xwayland": True, "host_display_environment": False,
                       "inherited_xdg_runtime_dir": False,
                       "sandbox": "bundled bwrap", "project_directory": "read-only /work",
                       "native_gui_saved_bytes": "Native Wayland works", "video_decoded": True}

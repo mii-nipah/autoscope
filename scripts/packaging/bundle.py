@@ -19,7 +19,8 @@ lib_dir.mkdir()
 system_libraries = {"libc.so.6", "libm.so.6", "libdl.so.2", "librt.so.1", "libpthread.so.0",
                     "libresolv.so.2", "libanl.so.1", "libutil.so.1"}
 origins = set()
-executables = [output / "cargo/release/autoscope", *(Path(shutil.which(name)) for name in ("bwrap", "ffmpeg", "ffplay"))]
+executables = [output / "cargo/release/autoscope", *(Path(shutil.which(name)) for name in
+               ("bwrap", "ffmpeg", "ffplay", "Xwayland", "xkbcomp"))]
 for executable in executables:
     destination = bin_dir / executable.name
     shutil.copy2(executable, destination)
@@ -36,6 +37,15 @@ for executable in executables:
         subprocess.run(["patchelf", "--set-rpath", "$ORIGIN", str(lib_dir / name)], check=True)
         origins.add(Path(path))
 
+# Reject accidental host builds before claiming the Ubuntu 22.04 ABI baseline.
+glibc_versions = set()
+for path in (*bin_dir.iterdir(), *lib_dir.iterdir()):
+    symbols = subprocess.check_output(["readelf", "--dyn-syms", "--wide", str(path)], text=True)
+    glibc_versions.update(re.findall(r"@GLIBC_(\d+\.\d+(?:\.\d+)?)", symbols))
+required_glibc = max(glibc_versions, key=lambda version: tuple(map(int, version.split("."))))
+if tuple(map(int, required_glibc.split("."))) > (2, 35):
+    raise RuntimeError(f"Runtime requires glibc {required_glibc}; rebuild with scripts/build-bundle.sh")
+
 shutil.copytree("/usr/share/X11/xkb", appdir / "usr/share/X11/xkb")
 shutil.copy2(source / "scripts/packaging/AppRun", appdir / "AppRun")
 (appdir / "AppRun").chmod(0o755)
@@ -48,7 +58,7 @@ shutil.copy2(source / "NOTICE", appdir / "NOTICE")
 
 packages = {"xkb-data"}
 for path in origins:
-    if path.name == "autoscope":
+    if path.name == "autoscope" or path.is_relative_to("/opt/autoscope-x11"):
         continue
     for candidate in dict.fromkeys((str(path), str(path.resolve()), "/usr" + str(path))):
         owner = subprocess.run(["dpkg-query", "-S", candidate], capture_output=True, text=True)
@@ -59,6 +69,7 @@ for path in origins:
         raise RuntimeError(f"No package provenance for {path}")
 licenses = appdir / "usr/share/licenses"
 licenses.mkdir()
+shutil.copytree("/opt/autoscope-x11/share/autoscope-licenses", licenses / "xwayland-runtime")
 package_sources = []
 for package in sorted(packages):
     name = package.split(":")[0]
@@ -80,6 +91,8 @@ for package in rust_packages:
             shutil.copy2(path, dest / path.name)
 
 info = {"architecture": platform.machine(), "build_base": "Ubuntu 22.04", "glibc_minimum": "2.35",
+        "glibc_required": required_glibc, "xwayland_xkbcomp_lookup": "PATH",
+        "upstream_sources": json.loads(Path("/opt/autoscope-sources/xwayland-sources.json").read_text()),
         "system_sources": sorted(set(package_sources)),
         "rust_packages": [{key: p.get(key) for key in ("name", "version", "license", "source")} for p in rust_packages]}
 (appdir / "build-info.json").write_text(json.dumps(info, indent=2) + "\n")

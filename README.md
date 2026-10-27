@@ -14,7 +14,7 @@ autoscope runs one Linux application inside its own headless Wayland compositor 
 
 - **One contract for every app.** Start a session, read one JSON line, drive the returned control socket.
 - **Observe, then act.** Each input waits for the screen to settle and reports the frame it produced. The MCP server rejects actions planned against a stale screenshot.
-- **Evidence built in.** PNG screenshots, MP4 recordings, contact sheets for image-only models, and a raw realtime frame stream.
+- **Evidence built in.** PNG screenshots, MP4 recordings, contact sheets for image-only models, LK motion arrows with a trails option, and a raw realtime frame stream.
 - **Isolated by default.** Private displays, a private home, a read-only project mount, one shared folder, and optional network removal.
 - **Agent-ready.** A stdio MCP server, plus a prebuilt Codex plugin that needs no setup step.
 
@@ -85,7 +85,7 @@ Agents that prefer plain processes can use the same lifecycle as the quick start
 
 ## Codex plugin
 
-[`plugin/autoscope`](plugin/autoscope/README.md) packages autoscope for Codex with a prebuilt Linux x86_64 runtime (glibc 2.35 or newer), its libraries, bubblewrap, FFmpeg, the MCP connection, and a skill for visual app workflows. Install it, start a new task, and ask:
+[`plugin/autoscope`](plugin/autoscope/README.md) packages autoscope for Codex with a prebuilt Linux x86_64 runtime (glibc 2.35 or newer), its libraries, Xwayland, bubblewrap, FFmpeg, the MCP connection, and a skill for visual app workflows. Install it, start a new task, and ask:
 
 > Open my app in Autoscope, test its main workflow, and show me the result.
 
@@ -127,6 +127,8 @@ There is intentionally no desktop shell, portal bridge, clipboard bridge, audio 
 
 ## Building the portable runtime
 
+A binary built on a newer host may require a newer glibc than a distrobox provides. Use the portable runtime inside distroboxes, or compile inside the oldest target distribution. The portable build checks every bundled ELF against its glibc 2.35 baseline and supplies Xwayland with xwayland-shell support.
+
 Maintainers build the portable runtime on an Ubuntu 22.04 base with Podman, then package it with Python and `appimagetool`:
 
 ```bash
@@ -135,7 +137,7 @@ python3 scripts/package-plugin.py
 scripts/package-sources.sh
 ```
 
-`target/plugin/` then holds the Codex plugin archive, a standalone AppImage, their SHA-256 checksums, and a companion source archive with vendored Rust crates and the exact Ubuntu source packages used by the runtime. The AppImage accepts the same CLI commands and `--appimage-extract-and-run` when FUSE is unavailable.
+`target/plugin/` then holds the Codex plugin archive, a standalone AppImage, their SHA-256 checksums, and a companion source archive with vendored Rust crates and the exact Ubuntu and upstream source packages used by the runtime. The AppImage accepts the same CLI commands and `--appimage-extract-and-run` when FUSE is unavailable.
 
 ## Contributing
 
@@ -143,11 +145,12 @@ Issues and pull requests are welcome.
 
 - **Bug reports:** include your distribution, whether the app is native Wayland, X11, or Flatpak, the `autoscope run` command, and the session `log` from the ready line. A screenshot from `autoscope ctl … screenshot` helps a lot.
 - **Pull requests:** keep each one focused on one change, and describe the behavior it changes. Run `cargo fmt`, `cargo clippy`, and `cargo test` before opening it.
-- **Sandbox and packaging changes:** also run the end-to-end workflows against a built package. They need Xwayland, Xmessage, Zenity, and Flatpak Chrome.
+- **Sandbox and packaging changes:** also run the end-to-end workflows against a built package. They need Xmessage, Zenity, and Flatpak Chrome; the package supplies Xwayland.
 
   ```bash
-  python3 tests/portable_workflow.py /path/to/autoscope --artifacts target/native-evidence
-  python3 tests/plugin_workflow.py /path/to/autoscope --artifacts target/plugin-evidence
+  python3 tests/portable_workflow.py /path/to/extracted/autoscope --artifacts target/native-evidence
+  python3 tests/plugin_workflow.py /path/to/extracted/autoscope --artifacts target/plugin-evidence
+  python3 tests/motion_workflow.py /path/to/extracted/autoscope --artifacts target/motion-evidence
   ```
 
 Be kind and assume good faith. Harassment and personal attacks aren't welcome in issues, pull requests, or anywhere else in the project.

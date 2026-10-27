@@ -14,7 +14,7 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::control::{DragPath, RecordingMode, Request};
+use crate::control::{DragPath, MotionStyle, RecordingMode, RecordingOptions, Request};
 use coordinator::{
     ActionResult, Application, Capture, Coordinator, SandboxMode, SessionInfo, SessionOptions,
 };
@@ -122,30 +122,10 @@ struct KeyParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-enum RecordingModeParam {
-    Video,
-    Images,
-}
-
-impl From<RecordingModeParam> for RecordingMode {
-    fn from(value: RecordingModeParam) -> Self {
-        match value {
-            RecordingModeParam::Video => Self::Video,
-            RecordingModeParam::Images => Self::Images,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct StartRecordingParams {
     session: String,
-    /// Recording FPS; defaults to the session FPS and cannot exceed it.
-    fps: Option<u32>,
-    /// video creates an MP4; images creates chronological contact-sheet PNGs.
-    mode: Option<RecordingModeParam>,
-    /// Frames per contact sheet in images mode (default and maximum 10).
-    frames_per_image: Option<u32>,
+    #[serde(flatten)]
+    options: RecordingOptions,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -225,8 +205,24 @@ impl AutoscopeMcp {
         } else {
             ""
         };
+        let motion = match recording.motion {
+            MotionStyle::Off => String::new(),
+            style => format!(
+                " LK feature paths show image motion, including scrolling/camera movement: blue is older, amber is newer. {} History {}.",
+                if style == MotionStyle::Arrows {
+                    "Arrowheads indicate travel direction; their size is not displacement."
+                } else {
+                    "Trails have no arrowheads."
+                },
+                if recording.mode == RecordingMode::Images {
+                    "accumulates across each sheet"
+                } else {
+                    "covers the last second"
+                },
+            ),
+        };
         let mut content = vec![ContentBlock::text(format!(
-            "Recorded {} frames at {} FPS as {mode}.{ordering}",
+            "Recorded {} frames at {} FPS as {mode}.{ordering}{motion}",
             recording.frames, recording.fps,
         ))];
         if recording.mode == RecordingMode::Images {
@@ -462,18 +458,15 @@ impl AutoscopeMcp {
         }
     }
 
-    #[tool(description = "Start an independently sampled MP4 or contact-sheet image recording")]
+    #[tool(
+        description = "Start an independently sampled MP4 or contact-sheet recording; LK arrows by default, with per-recording trails/off options"
+    )]
     fn start_recording(
         &self,
         Parameters(params): Parameters<StartRecordingParams>,
     ) -> Result<Json<ActionResult>, String> {
         self.lock()?
-            .start_recording(
-                &params.session,
-                params.fps,
-                params.mode.map(Into::into).unwrap_or_default(),
-                params.frames_per_image.unwrap_or(10),
-            )
+            .start_recording(&params.session, params.options)
             .map(Json)
             .map_err(|error| error.to_string())
     }

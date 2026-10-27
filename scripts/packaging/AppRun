@@ -10,12 +10,9 @@ export XKB_CONFIG_ROOT="$app_dir/usr/share/X11/xkb"
 [ "$#" -gt 0 ] || set -- --help
 if [ "$1" = doctor ]; then
     "$app_dir/usr/bin/autoscope" --version
-    printf 'Runtime, libraries, keyboard data, bubblewrap, ffmpeg and ffplay: bundled\n'
-    if command -v Xwayland >/dev/null 2>&1; then
-        printf 'Xwayland: available; native Wayland and X11 apps supported\n'
-    else
-        printf 'Xwayland: absent; native Wayland apps supported\n'
-    fi
+    "$app_dir/usr/bin/Xwayland" -version
+    "$app_dir/usr/bin/xkbcomp" -version
+    printf 'Runtime, libraries, Xwayland, keyboard data, bubblewrap, ffmpeg and ffplay: bundled\n'
     if command -v flatpak >/dev/null 2>&1; then
         printf 'Flatpak: available\n'
     else

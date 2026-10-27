@@ -5,6 +5,14 @@ COPY --from=rust /usr/local/rustup /usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:${PATH}" RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo CARGO_BUILD_JOBS=4
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential pkg-config libxkbcommon-dev libpixman-1-dev \
-    bubblewrap ffmpeg xkb-data patchelf python3 ca-certificates git \
+    bubblewrap ffmpeg xkb-data xwayland x11-xkb-utils patchelf python3 ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
+# Ubuntu 22.04's Xwayland predates xwayland-shell, required by our compositor.
+RUN sed -n 's/^deb /deb-src /p' /etc/apt/sources.list > /etc/apt/sources.list.d/autoscope-sources.list \
+    && apt-get update && apt-get build-dep -y --no-install-recommends xwayland \
+    && apt-get install -y --no-install-recommends libffi-dev libexpat1-dev \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/autoscope-x11/bin:${PATH}" PKG_CONFIG_PATH=/opt/autoscope-x11/lib/pkgconfig:/opt/autoscope-x11/share/pkgconfig LD_LIBRARY_PATH=/opt/autoscope-x11/lib
+COPY build-xwayland.py xwayland-sources.json /opt/build-xwayland/
+RUN python3 /opt/build-xwayland/build-xwayland.py
 WORKDIR /source

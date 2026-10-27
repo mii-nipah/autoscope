@@ -189,32 +189,11 @@ enum CtlCommand {
     },
     RecordStart {
         path: PathBuf,
-        /// Recording FPS; defaults to the session FPS.
-        #[arg(long)]
-        fps: Option<u32>,
-        #[arg(long, value_enum, default_value_t = RecordingModeArg::Video)]
-        mode: RecordingModeArg,
-        /// Frames tiled into each image sheet (images mode, maximum 10).
-        #[arg(long, default_value_t = 10)]
-        frames_per_image: u32,
+        #[command(flatten)]
+        options: control::RecordingOptions,
     },
     RecordStop,
     Quit,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum RecordingModeArg {
-    Video,
-    Images,
-}
-
-impl From<RecordingModeArg> for control::RecordingMode {
-    fn from(value: RecordingModeArg) -> Self {
-        match value {
-            RecordingModeArg::Video => Self::Video,
-            RecordingModeArg::Images => Self::Images,
-        }
-    }
 }
 
 fn main() -> Result<()> {
@@ -284,7 +263,11 @@ fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
     );
     render::install(&mut event_loop, &mut state, backend, args.fps)?;
     let xdisplay = if launch::which("Xwayland").is_some() {
-        Some(x11::start(&mut event_loop, &mut state)?)
+        Some(x11::start(
+            &mut event_loop,
+            &mut state,
+            &files.root.join("session.log"),
+        )?)
     } else {
         tracing::info!("Xwayland is not installed; running with native Wayland support");
         None
@@ -429,17 +412,7 @@ fn ctl(args: CtlArgs) -> Result<()> {
             quiet_ms,
         },
         CtlCommand::Screenshot { path } => Request::Screenshot { path },
-        CtlCommand::RecordStart {
-            path,
-            fps,
-            mode,
-            frames_per_image,
-        } => Request::RecordStart {
-            path,
-            fps,
-            mode: mode.into(),
-            frames_per_image,
-        },
+        CtlCommand::RecordStart { path, options } => Request::RecordStart { path, options },
         CtlCommand::RecordStop => Request::RecordStop,
         CtlCommand::Quit => Request::Quit,
     };

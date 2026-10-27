@@ -1,0 +1,46 @@
+[
+  {
+    "name": "wayland-1.23.1",
+    "url": "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.23.1/downloads/wayland-1.23.1.tar.xz",
+    "sha256": "864fb2a8399e2d0ec39d56e9d9b753c093775beadc6022ce81f441929a81e5ed",
+    "options": [
+      "-Ddocumentation=false",
+      "-Dtests=false",
+      "-Ddtd_validation=false"
+    ]
+  },
+  {
+    "name": "wayland-protocols-1.36",
+    "url": "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.36/downloads/wayland-protocols-1.36.tar.xz",
+    "sha256": "71fd4de05e79f9a1ca559fac30c1f8365fa10346422f9fe795f74d77b9ef7e92",
+    "options": [
+      "-Dtests=false"
+    ]
+  },
+  {
+    "name": "xorgproto-2024.1",
+    "url": "https://www.x.org/releases/individual/proto/xorgproto-2024.1.tar.xz",
+    "sha256": "372225fd40815b8423547f5d890c5debc72e88b91088fbfb13158c20495ccb59",
+    "options": []
+  },
+  {
+    "name": "libdrm-2.4.120",
+    "url": "https://dri.freedesktop.org/libdrm/libdrm-2.4.120.tar.xz",
+    "sha256": "3bf55363f76c7250946441ab51d3a6cc0ae518055c0ff017324ab76cdefb327a",
+    "options": [
+      "-Dtests=false",
+      "-Dman-pages=disabled"
+    ]
+  },
+  {
+    "name": "xwayland-24.1.14",
+    "url": "https://www.x.org/releases/individual/xserver/xwayland-24.1.14.tar.xz",
+    "sha256": "4eb6b98d678299a4b96138d886345b294130695760345ef84596225a8224078a",
+    "options": [
+      "-Dxwayland_ei=false",
+      "-Dxvfb=false",
+      "-Ddocs=false",
+      "-Ddevel-docs=false"
+    ]
+  }
+]

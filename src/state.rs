@@ -41,7 +41,7 @@ use smithay::{
 };
 
 use crate::{
-    control::{self, Envelope, Recorder, RecordingMode, Request, Response, Viewer},
+    control::{self, Envelope, Recorder, RecordingOptions, Request, Response, Viewer},
     cursor,
     session::{self, ExitReason},
     x11::X11State,
@@ -230,21 +230,14 @@ impl Autoscope {
             Request::Screenshot { path } => self
                 .screenshot(&path)
                 .map(|_| json!({"path": path, "frame": self.frame_seq, "view": self.view_seq})),
-            Request::RecordStart {
-                path,
-                fps,
-                mode,
-                frames_per_image,
-            } => self
-                .start_recording(&path, fps, mode, frames_per_image)
-                .map(|fps| {
+            Request::RecordStart { path, options } => {
+                self.start_recording(&path, options).map(|fps| {
                     json!({
-                        "path": path,
-                        "fps": fps,
-                        "mode": mode,
-                        "frames_per_image": frames_per_image,
+                        "path": path, "fps": fps, "mode": options.mode,
+                        "frames_per_image": options.frames_per_image, "motion": options.motion,
                     })
-                }),
+                })
+            }
             Request::RecordStop => self.stop_recording().map(|result| json!(result)),
             Request::Quit => {
                 self.stop(ExitReason::Requested);
@@ -271,15 +264,19 @@ impl Autoscope {
     fn move_pointer(&mut self, x: f64, y: f64, normalize: bool) -> Result<(), String> {
         self.pointer = Point::from(pointer_coordinates(self.size, x, y, normalize)?);
         let pointer = self.seat.get_pointer().unwrap();
-        pointer.motion(
-            self,
-            self.surface_under(self.pointer),
-            &MotionEvent {
-                location: self.pointer,
-                serial: SERIAL_COUNTER.next_serial(),
-                time: InputTime::now(),
-            },
-        );
+        let focus = self.surface_under(self.pointer);
+        let previous_focus = pointer.current_focus();
+        let event = MotionEvent {
+            location: self.pointer,
+            serial: SERIAL_COUNTER.next_serial(),
+            time: InputTime::now(),
+        };
+        pointer.motion(self, focus.clone(), &event);
+        // Enter alone does not invoke GLFW's cursor-position callback. Deliver
+        // this movement before a following click, including on first focus.
+        if pointer.current_focus() != previous_focus {
+            pointer.motion(self, focus, &event);
+        }
         pointer.frame(self);
         Ok(())
     }
@@ -343,27 +340,17 @@ impl Autoscope {
     fn start_recording(
         &mut self,
         path: &std::path::Path,
-        fps: Option<u32>,
-        mode: RecordingMode,
-        frames_per_image: u32,
+        options: RecordingOptions,
     ) -> Result<u32, String> {
         if self.recorder.is_some() {
             return Err("a recording is already active".into());
         }
-        let fps = fps.unwrap_or(self.fps);
-        let mut recorder = Recorder::start(
-            path,
-            self.size.0,
-            self.size.1,
-            self.fps,
-            fps,
-            mode,
-            frames_per_image,
-        )
-        .map_err(|error| error.to_string())?;
+        let mut recorder = Recorder::start(path, self.size, self.fps, options)
+            .map_err(|error| error.to_string())?;
         if let Some(frame) = &self.latest_frame {
             recorder.frame(frame).map_err(|error| error.to_string())?;
         }
+        let fps = recorder.fps;
         self.recorder = Some(recorder);
         Ok(fps)
     }

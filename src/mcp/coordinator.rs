@@ -15,7 +15,7 @@ use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::control::{self, RecordingMode, RecordingResult, Request};
+use crate::control::{self, RecordingMode, RecordingOptions, RecordingResult, Request};
 
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -384,9 +384,7 @@ impl Coordinator {
     pub(super) fn start_recording(
         &mut self,
         session: &str,
-        fps: Option<u32>,
-        mode: RecordingMode,
-        frames_per_image: u32,
+        options: RecordingOptions,
     ) -> Result<ActionResult> {
         self.reap()?;
         if self
@@ -397,20 +395,12 @@ impl Coordinator {
         {
             bail!("session is already recording");
         }
-        let extension = match mode {
+        let extension = match options.mode {
             RecordingMode::Video => "mp4",
             RecordingMode::Images => "png",
         };
         let path = self.artifact_path(session, extension);
-        let result = self.request(
-            session,
-            Request::RecordStart {
-                path,
-                fps,
-                mode,
-                frames_per_image,
-            },
-        )?;
+        let result = self.request(session, Request::RecordStart { path, options })?;
         self.sessions.get_mut(session).unwrap().recording = true;
         Ok(ActionResult {
             session: session.into(),

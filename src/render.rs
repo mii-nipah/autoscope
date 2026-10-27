@@ -5,10 +5,10 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            Bind, ExportMem, Offscreen,
+            Bind, ExportMem, Frame, Offscreen, Renderer,
             damage::OutputDamageTracker,
             element::{Kind, memory::MemoryRenderBufferRenderElement},
-            pixman::PixmanRenderer,
+            pixman::{PixmanRenderer, PixmanTarget},
         },
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
@@ -111,36 +111,110 @@ fn draw(
     damage_tracker: &mut OutputDamageTracker,
     state: &Autoscope,
 ) -> Result<Vec<u8>> {
-    let mut framebuffer = backend.renderer.bind(&mut backend.target)?;
-    let cursor = [MemoryRenderBufferRenderElement::from_buffer(
-        &mut backend.renderer,
-        (state.pointer.x.round(), state.pointer.y.round()),
-        &state.cursor,
-        Some(crate::cursor::ALPHA),
-        None,
-        None,
-        Kind::Cursor,
-    )?];
-    smithay::desktop::space::render_output::<
-        _,
-        MemoryRenderBufferRenderElement<PixmanRenderer>,
-        _,
-        _,
-    >(
-        output,
-        &mut backend.renderer,
-        &mut framebuffer,
-        1.0,
-        0,
-        [&state.space],
-        &cursor,
-        damage_tracker,
-        [0.08, 0.09, 0.11, 1.0],
-    )?;
-    let mapping = backend.renderer.copy_framebuffer(
-        &framebuffer,
-        Rectangle::<i32, Buffer>::from_size(backend.size.into()),
-        Fourcc::Abgr8888,
-    )?;
-    Ok(backend.renderer.map_texture(&mapping)?.to_vec())
+    backend.capture(|renderer, framebuffer| {
+        let cursor = [MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            (state.pointer.x.round(), state.pointer.y.round()),
+            &state.cursor,
+            Some(crate::cursor::ALPHA),
+            None,
+            None,
+            Kind::Cursor,
+        )?];
+        smithay::desktop::space::render_output::<
+            _,
+            MemoryRenderBufferRenderElement<PixmanRenderer>,
+            _,
+            _,
+        >(
+            output,
+            renderer,
+            framebuffer,
+            1.0,
+            0,
+            [&state.space],
+            &cursor,
+            damage_tracker,
+            [0.08, 0.09, 0.11, 1.0],
+        )?;
+        Ok(())
+    })
+}
+
+impl Backend {
+    fn capture(
+        &mut self,
+        draw: impl FnOnce(&mut PixmanRenderer, &mut PixmanTarget<'_>) -> Result<()>,
+    ) -> Result<Vec<u8>> {
+        let mut framebuffer = self.renderer.bind(&mut self.target)?;
+        // Each capture is a complete repaint (buffer age 0 below). Pixman still
+        // blends alpha inside opaque regions, which the damage tracker skips when
+        // clearing. Start from opaque black so undefined alpha in those regions
+        // cannot accumulate the previous frame's RGB (e.g. native Wayland games).
+        let mut frame =
+            self.renderer
+                .render(&mut framebuffer, self.size.into(), Transform::Normal)?;
+        frame.clear(
+            [0.0, 0.0, 0.0, 1.0].into(),
+            &[Rectangle::from_size(self.size.into())],
+        )?;
+        frame.finish()?.wait()?;
+        draw(&mut self.renderer, &mut framebuffer)?;
+        let mapping = self.renderer.copy_framebuffer(
+            &framebuffer,
+            Rectangle::<i32, Buffer>::from_size(self.size.into()),
+            Fourcc::Abgr8888,
+        )?;
+        Ok(self.renderer.map_texture(&mapping)?.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
+
+    #[test]
+    fn opaque_pixels_ignore_alpha_without_accumulating_previous_frames() {
+        let mut backend = create_headless_backend(2, 1).unwrap();
+        let mut tracker = OutputDamageTracker::new((2, 1), 1.0, Transform::Normal);
+        for alpha in [0, 64, 128, 255] {
+            let buffer = MemoryRenderBuffer::from_slice(
+                &[12, 34, 56, alpha, 64, 32, 0, 128],
+                Fourcc::Abgr8888,
+                (2, 1),
+                1,
+                Transform::Normal,
+                Some(vec![Rectangle::from_size((1, 1).into())]),
+            );
+            for _ in 0..16 {
+                let pixels = backend
+                    .capture(|renderer, framebuffer| {
+                        let element = MemoryRenderBufferRenderElement::from_buffer(
+                            renderer,
+                            (0.0, 0.0),
+                            &buffer,
+                            None,
+                            None,
+                            None,
+                            Kind::Unspecified,
+                        )?;
+                        tracker.render_output(
+                            renderer,
+                            framebuffer,
+                            0,
+                            &[element],
+                            [0.2, 0.4, 0.6, 1.0],
+                        )?;
+                        Ok(())
+                    })
+                    .unwrap();
+                assert_eq!(&pixels[..4], &[12, 34, 56, 255]);
+                // The pixel outside the opaque region still blends over the background.
+                for (actual, expected) in pixels[4..].iter().zip([89_u8, 83, 76, 255]) {
+                    assert!(actual.abs_diff(expected) <= 1, "{pixels:?}");
+                }
+            }
+        }
+    }
 }

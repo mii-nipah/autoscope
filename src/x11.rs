@@ -1,5 +1,8 @@
 use std::{
     borrow::Cow,
+    ffi::OsString,
+    fs::OpenOptions,
+    path::Path,
     process::Stdio,
     time::{Duration, Instant},
 };
@@ -99,15 +102,24 @@ impl KeyboardTarget<Autoscope> for KeyboardFocus {
     }
 }
 
-pub fn start(event_loop: &mut EventLoop<'static, Autoscope>, state: &mut Autoscope) -> Result<u32> {
+pub fn start(
+    event_loop: &mut EventLoop<'static, Autoscope>,
+    state: &mut Autoscope,
+    log: &Path,
+) -> Result<u32> {
+    let log = OpenOptions::new().create(true).append(true).open(log)?;
+    let mut args = Vec::<OsString>::new();
+    if let Some(root) = std::env::var_os("XKB_CONFIG_ROOT") {
+        args.extend(["-xkbdir".into(), root]);
+    }
     let (mut xwayland, client) = XWayland::spawn(
         &state.display_handle,
         None,
         std::iter::empty::<(String, String)>(),
-        std::iter::empty::<String>(),
+        args,
         false,
-        Stdio::null(),
-        Stdio::null(),
+        Stdio::from(log.try_clone()?),
+        Stdio::from(log),
         |_| (),
     )
     .context("start private XWayland server")?;

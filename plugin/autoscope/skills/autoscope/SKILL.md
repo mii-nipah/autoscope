@@ -9,13 +9,12 @@ Use this plugin's MCP tools to launch and operate one Linux application per sess
 
 ## Setup
 
-The plugin contains its runtime and helpers; there is no build or setup step. If tools are unavailable or the user asks to check Autoscope, run `runtime/AppRun doctor` from the plugin root (two directories above this skill) and read [the plugin README](../../README.md). A new Codex task is required after installation. A missing runtime indicates an incomplete package; reinstall it rather than installing an unrelated package named Autoscope. Xwayland is optional and needed only for X11 apps; Flatpak is needed only for Flatpak apps.
+The plugin contains its runtime and helpers; there is no build or setup step. If tools are unavailable or the user asks to check Autoscope, run `runtime/AppRun doctor` from the plugin root (two directories above this skill) and read [the plugin README](../../README.md). A new Codex task is required after installation. A missing runtime indicates an incomplete package; reinstall it rather than installing an unrelated package named Autoscope. Xwayland is bundled; Flatpak is needed only for Flatpak apps. In a distrobox, use this runtime rather than a newer-host build in `~/.cargo/bin`.
 
 ## Launch and observe
 
 - Discover the installed application executable or Flatpak ID. `spawn_command` takes `command: ["program", "arg", ...]`, without shell interpretation. For project apps, set `options.working_dir` to the absolute project directory and use a relative executable such as `./target/debug/my-app`. That directory becomes `/work` inside bwrap. The plugin server's own directory is not the user's project.
 - The plugin bundles bwrap, so native applications use filesystem isolation by default. Use `sandbox: "bwrap"` to require it explicitly. Resolve a sandbox failure before weakening isolation.
-- For offline X11 workflows, use `options.no_network: true`. A tested host has a display-authorization failure for X11 clients with shared networking; see the README's troubleshooting note. Do not solve this by granting access to the user's host display.
 - `spawn_flatpak` takes `application_id` and optional `arguments`. Autoscope creates the private displays and application profile. Avoid the user's normal browser/profile and host display sockets.
 - `options` supports `name`, `width`, `height`, `fps`, `shared_dir`, `window`, and `no_network`. Portrait is simply a taller display, e.g. `width: 390, height: 844`. `window: true` opens a read-only viewer when the user wants to watch.
 - Inspect the returned image before choosing an action. Every input requires the latest returned `view`. Perform one action, inspect its image, and use its new view for the next. Do not send parallel or preplanned inputs for the same session.
@@ -32,6 +31,8 @@ Place input files and save outputs in the returned `shared_dir`, which has the s
 ## Evidence and completion
 
 Use `screenshot` for still evidence. `start_recording` with `mode: "images", fps: 1` and then `stop_recording` returns compact contact sheets directly as MCP images; frames read left-to-right, then top-to-bottom. Use `mode: "video"` when a video is useful; FFmpeg is bundled. Stop recording before closing the session and retain the returned paths.
+
+Recordings default to LK motion arrows (`motion: "arrows"`). Set `motion: "trails"` for the same tracked paths without arrowheads, or `motion: "off"` for unannotated output. Choose per recording without restarting the session. Blue is older, amber is newer; arrowheads indicate direction, not displacement magnitude. Contact sheets retain history across the whole sheet, including intermediate motion, and reset on the next sheet. Video retains one second. These are image-space feature paths, including scrolling/camera movement, not object identities or physical rotation measurements. Ordinary screenshots remain unannotated.
 
 Check the requested application outcome, then `close_session`. `list_sessions` lists only sessions owned by this MCP server. Server exit closes its sessions; shared files, logs, and recordings survive. For an explicitly persistent session, use the CLI's detached lifecycle and `autoscope readme` instead.
 

@@ -2,7 +2,7 @@
 
 Autoscope runs one Wayland or X11 application in a private automation session. Start a session, read its ready line, use the returned control socket, then quit it.
 
-Xwayland is detected automatically and is only needed for X11 applications. Native Wayland applications also work without a host Wayland display. If `XDG_RUNTIME_DIR` is missing or empty, Autoscope uses the existing `/run/user/<uid>` directory; an explicit runtime directory is honored. The selected directory must belong to the current user and have mode `0700`. The binary plugin and AppImage include libraries, keyboard data, bubblewrap, and FFmpeg helpers. Use `runtime/AppRun` or the AppImage path in place of `autoscope` in the commands below. The AppImage also accepts `--appimage-extract-and-run` when FUSE is unavailable.
+Xwayland is detected automatically and is only needed for X11 applications. Native Wayland applications also work without a host Wayland display. If `XDG_RUNTIME_DIR` is missing or empty, Autoscope uses the existing `/run/user/<uid>` directory; an explicit runtime directory is honored. The selected directory must belong to the current user and have mode `0700`. The binary plugin and AppImage include libraries, Xwayland, keyboard data, bubblewrap, and FFmpeg helpers. Use `runtime/AppRun` or the AppImage path in place of `autoscope` in the commands below. The AppImage also accepts `--appimage-extract-and-run` when FUSE is unavailable.
 
 Print this guide with `autoscope readme`.
 
@@ -73,7 +73,7 @@ autoscope ctl SOCKET type [--no-wait] TEXT
 autoscope ctl SOCKET key [--no-wait] COMBO
 autoscope ctl SOCKET wait [--timeout-ms MS] [--quiet-ms MS]
 autoscope ctl SOCKET screenshot PATH
-autoscope ctl SOCKET record-start [--fps FPS] [--mode video|images] [--frames-per-image 1..10] PATH
+autoscope ctl SOCKET record-start [--fps FPS] [--mode video|images] [--frames-per-image 1..10] [--motion=arrows|trails|off] PATH
 autoscope ctl SOCKET record-stop
 autoscope ctl SOCKET quit
 ```
@@ -126,6 +126,10 @@ autoscope ctl "$CONTROL" record-stop
 ```
 
 The recording FPS defaults to the session FPS and cannot exceed it. Image mode writes `/tmp/actions-001.png`, `/tmp/actions-002.png`, and so on; frames are at most 320 pixels wide and ordered left-to-right, then top-to-bottom.
+
+Recordings use pyramidal Lucas-Kanade (LK) feature tracking with direction arrows by default. Choose `--motion=trails` for the same paths without arrowheads, or `--motion=off` for unannotated output. You can change the choice on each `record-start`; no session restart is needed.
+
+Blue is older, amber is newer. Contact sheets retain history across the whole sheet, including intermediate motion between captured frames, then reset for the next sheet. Video retains one second. Markers are drawn at the final output resolution; arrowhead size is for visibility, not speed or displacement. Tracking uses up to 240 image features at up to 15 FPS and 640 pixels on the longest side, with forward/backward consistency filtering. These are image-space paths, including camera movement and scrolling, not object identities or physical rotation estimates. Ordinary screenshots and live views remain unannotated.
 
 ## Read the realtime frame stream
 

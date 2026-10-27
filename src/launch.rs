@@ -161,7 +161,8 @@ fn spawn_flatpak(
         .env_remove("WAYLAND_DISPLAY")
         .envs(host.wayland_display.as_ref().map(|value| ("WAYLAND_DISPLAY", value)))
         .env_remove("DISPLAY")
-        .env_remove("XAUTHORITY");
+        .env_remove("XAUTHORITY")
+        .env_remove("XKB_CONFIG_ROOT");
     if let Some(display) = display {
         command.env("DISPLAY", display);
     }
@@ -289,6 +290,21 @@ fn spawn_command(
             "--unsetenv",
             "DBUS_SESSION_BUS_ADDRESS",
         ]);
+    for (variable, directory) in [
+        ("XDG_CONFIG_HOME", "config"),
+        ("XDG_CACHE_HOME", "cache"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_STATE_HOME", "state"),
+    ] {
+        command.args(["--setenv", variable, &format!("/home/agent/{directory}")]);
+    }
+    if let Some(keyboard_data) = env::var_os("XKB_CONFIG_ROOT") {
+        command
+            .arg("--ro-bind")
+            .arg(keyboard_data)
+            .arg("/usr/share/X11/xkb");
+        command.args(["--setenv", "XKB_CONFIG_ROOT", "/usr/share/X11/xkb"]);
+    }
     if let Some(display) = session.xdisplay {
         let socket = PathBuf::from(format!("/tmp/.X11-unix/X{display}"));
         if !fs::metadata(&socket)?.file_type().is_socket() {

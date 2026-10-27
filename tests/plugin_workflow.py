@@ -130,13 +130,20 @@ document.querySelector('#result').textContent='Verified: '+text;};</script>'''
             fixture = project / "launch.sh"
             fixture.write_text('#!/bin/sh\nset -eu\n[ "$PWD" = /work ]\n[ ! -w . ]\n'
                                'cat proof.txt > "$AUTOSCOPE_SHARED_DIR/proof.txt"\n'
-                               f'exec {shlex.quote(xmessage)} -buttons OK:0 "Autoscope project workspace verified"\n')
+                               f'{shlex.quote(xmessage)} -buttons OK:0 -default OK "Autoscope project workspace verified"\n'
+                               'echo clicked > "$AUTOSCOPE_SHARED_DIR/ui.txt"\nexec sleep 300\n')
             fixture.chmod(0o755)
-            native = mcp.tool("spawn_command", command=["./launch.sh"], sandbox="bwrap",
-                              options={"working_dir": str(project), "shared_dir": str(shared), "no_network": True})
-            native_state = save_image(native, artifacts / "native-workspace.png")
-            assert (shared / "proof.txt").read_bytes() == (project / "proof.txt").read_bytes()
-            mcp.tool("close_session", session=native_state["session"])
+            for network in (False, True):
+                (shared / "proof.txt").unlink(missing_ok=True)
+                (shared / "ui.txt").unlink(missing_ok=True)
+                native = mcp.tool("spawn_command", command=["./launch.sh"], sandbox="bwrap",
+                                  options={"working_dir": str(project), "shared_dir": str(shared),
+                                           "no_network": not network})
+                native_state = save_image(native, artifacts / f"native-workspace-network-{network}.png")
+                assert (shared / "proof.txt").read_bytes() == (project / "proof.txt").read_bytes()
+                mcp.tool("press_key", session=native_state["session"], view=native_state["view"], combo="ENTER")
+                assert (shared / "ui.txt").read_text() == "clicked\n"
+                mcp.tool("close_session", session=native_state["session"])
         with tempfile.TemporaryDirectory(prefix="autoscope-plugin-shared-") as shared:
             spawn = mcp.tool("spawn_flatpak", application_id="com.google.Chrome", arguments=[
                 f"--app=http://127.0.0.1:{server.server_port}/", "--window-size=800,600",
@@ -168,7 +175,7 @@ document.querySelector('#result').textContent='Verified: '+text;};</script>'''
             assert sessions == [], sessions
             assert submitted.empty(), "Stale input unexpectedly submitted the form again"
             report = {"tools": len(tools), "project_working_directory": "verified read-only /work",
-                      "native_x11_network": False,
+                      "native_x11_network": [False, True],
                       "form_submission": "Autoscope works", "stale_input_rejected": True,
                       "recording_sheets": len(images), "sessions_after_close": sessions}
             (artifacts / "result.json").write_text(json.dumps(report, indent=2) + "\n")

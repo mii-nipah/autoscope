@@ -15,6 +15,7 @@ podman run --rm --security-opt label=disable \
         cargo vendor --locked --versioned-dirs /build/sources/autoscope/vendor > /build/sources/autoscope/.cargo/config.toml
         sed -i "s|/build/sources/autoscope/vendor|vendor|g" /build/sources/autoscope/.cargo/config.toml
         cp /build/Autoscope.AppDir/build-info.json /build/sources/
+        cp -R /opt/autoscope-sources/. /build/sources/upstream/
         sed -n "s/^deb /deb-src /p" /etc/apt/sources.list > /etc/apt/sources.list.d/autoscope-sources.list
         apt-get update
         python3 scripts/packaging/sources.py /build/system-sources.txt /build/sources/system
