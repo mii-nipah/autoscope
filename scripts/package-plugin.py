@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the same prebuilt runtime as a Codex plugin and a standalone AppImage."""
+"""Package the same prebuilt runtime as a Codex and Claude Code plugin and a standalone AppImage."""
 import argparse
 import gzip
 import hashlib
@@ -46,7 +46,11 @@ def main():
         shutil.copytree(repo / "plugin" / "autoscope", stage)
         shutil.copy2(repo / "LICENSE", stage / "LICENSE")
         shutil.copytree(appdir, stage / "runtime")
-        version = json.loads((stage / ".codex-plugin" / "plugin.json").read_text())["version"]
+        versions = {json.loads((stage / manifest / "plugin.json").read_text())["version"]
+                    for manifest in (".codex-plugin", ".claude-plugin")}
+        if len(versions) != 1:
+            parser.error(f"Codex and Claude Code manifests disagree on version: {sorted(versions)}")
+        (version,) = versions
         package = output / f"autoscope-{version}-linux-{architecture}.tar.gz"
         package.write_bytes(archive_bytes(stage.parent, stage.rglob("*")))
         checksum = hashlib.sha256(package.read_bytes()).hexdigest()

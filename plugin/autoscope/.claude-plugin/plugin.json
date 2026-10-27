@@ -1,0 +1,27 @@
+{
+  "name": "autoscope",
+  "displayName": "Autoscope",
+  "version": "0.1.0",
+  "description": "Give Claude eyes and hands inside isolated Linux applications, with screenshots after every action.",
+  "author": {
+    "name": "nipah~✰!"
+  },
+  "repository": "https://github.com/mii-nipah/autoscope",
+  "license": "BSD-3-Clause",
+  "keywords": [
+    "linux",
+    "wayland",
+    "x11",
+    "flatpak",
+    "gui",
+    "automation",
+    "testing",
+    "screenshots"
+  ],
+  "mcpServers": {
+    "autoscope": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/runtime/AppRun",
+      "args": ["mcp"]
+    }
+  }
+}

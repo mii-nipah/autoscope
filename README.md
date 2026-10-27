@@ -16,13 +16,13 @@ autoscope runs one Linux application inside its own headless Wayland compositor 
 - **Observe, then act.** Each input waits for the screen to settle and reports the frame it produced. The MCP server rejects actions planned against a stale screenshot.
 - **Evidence built in.** PNG screenshots, MP4 recordings, contact sheets for image-only models, LK motion arrows with a trails option, and a raw realtime frame stream.
 - **Isolated by default.** Private displays, a private home, a read-only project mount, one shared folder, and optional network removal.
-- **Agent-ready.** A stdio MCP server, plus a prebuilt Codex plugin that needs no setup step.
+- **Agent-ready.** A stdio MCP server, plus a prebuilt Codex and Claude Code plugin that needs no setup step.
 
 ## Contents
 
 - [Quick start](#quick-start)
 - [Driving it from an agent](#driving-it-from-an-agent)
-- [Codex plugin](#codex-plugin)
+- [Agent plugin](#agent-plugin)
 - [How it works](#how-it-works)
 - [Building the portable runtime](#building-the-portable-runtime)
 - [Contributing](#contributing)
@@ -83,9 +83,9 @@ Its tools spawn host commands or Flatpaks, click, type, scroll, drag, press keys
 
 Agents that prefer plain processes can use the same lifecycle as the quick start: `run`, read the ready line, send `ctl` commands (or write JSON to the socket directly), then `quit`.
 
-## Codex plugin
+## Agent plugin
 
-[`plugin/autoscope`](plugin/autoscope/README.md) packages autoscope for Codex with a prebuilt Linux x86_64 runtime (glibc 2.35 or newer), its libraries, Xwayland, bubblewrap, FFmpeg, the MCP connection, and a skill for visual app workflows. Install it, start a new task, and ask:
+[`plugin/autoscope`](plugin/autoscope/README.md) packages autoscope for Codex and Claude Code with a prebuilt Linux x86_64 runtime (glibc 2.35 or newer), its libraries, Xwayland, bubblewrap, FFmpeg, the MCP connection, and a skill for visual app workflows. Install it ([Claude Code steps](plugin/autoscope/README.md#get-started)), start a new task or session, and ask:
 
 > Open my app in Autoscope, test its main workflow, and show me the result.
 
@@ -137,7 +137,7 @@ python3 scripts/package-plugin.py
 scripts/package-sources.sh
 ```
 
-`target/plugin/` then holds the Codex plugin archive, a standalone AppImage, their SHA-256 checksums, and a companion source archive with vendored Rust crates and the exact Ubuntu and upstream source packages used by the runtime. The AppImage accepts the same CLI commands and `--appimage-extract-and-run` when FUSE is unavailable.
+`target/plugin/` then holds the plugin archive for both agents, a standalone AppImage, their SHA-256 checksums, and a companion source archive with vendored Rust crates and the exact Ubuntu and upstream source packages used by the runtime. The AppImage accepts the same CLI commands and `--appimage-extract-and-run` when FUSE is unavailable.
 
 ## Contributing
 
@@ -152,6 +152,8 @@ Issues and pull requests are welcome.
   python3 tests/plugin_workflow.py /path/to/extracted/autoscope --artifacts target/plugin-evidence
   python3 tests/motion_workflow.py /path/to/extracted/autoscope --artifacts target/motion-evidence
   ```
+
+  For Claude Code, `claude plugin validate --strict` must pass on the package's `.claude-plugin/plugin.json`, and `claude --plugin-dir /path/to/extracted/autoscope mcp list` must show `plugin:autoscope:autoscope` connected from its `runtime/AppRun`.
 
 Be kind and assume good faith. Harassment and personal attacks aren't welcome in issues, pull requests, or anywhere else in the project.
 

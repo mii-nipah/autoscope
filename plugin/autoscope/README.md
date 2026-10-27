@@ -1,15 +1,22 @@
-# Autoscope for Codex
+# Autoscope for Codex and Claude Code
 
 **A private Linux app. Eyes and hands for your agent.**
 
-Autoscope lets Codex open a Linux application, see its screen, click, type, draw, and capture the result. Each application gets its own display and automation session. Your mouse and keyboard stay yours.
+Autoscope lets your agent open a Linux application, see its screen, click, type, draw, and capture the result. Each application gets its own display and automation session. Your mouse and keyboard stay yours.
 
 ## Get started
 
-1. Install **Autoscope** in Codex from its plugin card or shared plugin entry.
-2. Start a new task and ask: **“Open my app in Autoscope, test its main workflow, and show me the result.”**
+- **Codex:** install **Autoscope** from its plugin card or shared plugin entry, then start a new task.
+- **Claude Code:** extract this package to a permanent folder, such as `~/plugins/autoscope`, register it, then start a new session:
 
-The plugin includes a prebuilt runtime, its libraries, Xwayland, keyboard data, filesystem sandbox, and recording/viewer helpers. Installation requires no Rust, compilation, setup command, account, API key, or manual MCP configuration. Nothing is compiled or downloaded during MCP startup. The application you want to use must already be installed. Screenshots and tool results enter your Codex conversation; the local runtime is not a promise that model processing stays on your machine.
+  ```bash
+  claude plugin marketplace add ~/plugins/autoscope
+  claude plugin install autoscope@autoscope
+  ```
+
+Then ask: **“Open my app in Autoscope, test its main workflow, and show me the result.”**
+
+The plugin includes a prebuilt runtime, its libraries, Xwayland, keyboard data, filesystem sandbox, and recording/viewer helpers. Installation requires no Rust, compilation, setup command, account, API key, or manual MCP configuration. Nothing is compiled or downloaded during MCP startup. The application you want to use must already be installed. Screenshots and tool results enter your agent's conversation; the local runtime is not a promise that model processing stays on your machine.
 
 ## Linux prerequisites
 
@@ -37,7 +44,7 @@ For a project application, `spawn_command` accepts `options.working_dir` as an a
 
 ## Troubleshooting and manual use
 
-- **Tools missing after installation:** start a new Codex task. If `runtime/AppRun` is missing, reinstall the complete binary plugin package.
+- **Tools missing after installation:** start a new Codex task or Claude Code session. If `runtime/AppRun` is missing, reinstall the complete binary plugin package.
 - **X11 app cannot start:** run `runtime/AppRun doctor` and inspect the session log, which includes Xwayland startup errors.
 - **Distrobox reports a missing `GLIBC_…` version:** launch this package through `runtime/AppRun`, not a host-built binary in `~/.cargo/bin`. The package supports glibc 2.35 or newer and provides its own Xwayland and keyboard helpers.
 - **Sandbox launch denied:** inspect the reported bwrap/user-namespace error. Fix host policy or deliberately choose a different sandbox policy for that task.
@@ -46,4 +53,4 @@ For a project application, `spawn_command` accepts `options.working_dir` as an a
 
 `runtime/AppRun readme` prints the complete CLI guide. Advanced users can use `run --detach` for persistent sessions; MCP sessions close when their coordinator exits. Shared files, recordings, and logs are retained separately from the plugin installation. The standalone AppImage provides the same CLI; if FUSE is unavailable, run it with `--appimage-extract-and-run` before the Autoscope command.
 
-This package targets local Linux x86_64 hosts. ARM, macOS, Windows, remote ChatGPT execution, and arbitrary GPU presentation paths are not supported by this build. Component notices and build provenance are included in `runtime/usr/share/licenses/` and `runtime/build-info.json`. See [OpenAI's plugin packaging guide](https://developers.openai.com/plugins/build/plugins) for Codex installation and distribution surfaces.
+This package targets local Linux x86_64 hosts. ARM, macOS, Windows, remote ChatGPT or claude.ai execution, and arbitrary GPU presentation paths are not supported by this build. Component notices and build provenance are included in `runtime/usr/share/licenses/` and `runtime/build-info.json`. See [OpenAI's plugin packaging guide](https://developers.openai.com/plugins/build/plugins) and [Claude Code's plugin guide](https://code.claude.com/docs/en/plugins/install) for installation and distribution surfaces.

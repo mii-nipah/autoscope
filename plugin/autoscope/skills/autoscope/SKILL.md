@@ -9,7 +9,7 @@ Use this plugin's MCP tools to launch and operate one Linux application per sess
 
 ## Setup
 
-The plugin contains its runtime and helpers; there is no build or setup step. If tools are unavailable or the user asks to check Autoscope, run `runtime/AppRun doctor` from the plugin root (two directories above this skill) and read [the plugin README](../../README.md). A new Codex task is required after installation. A missing runtime indicates an incomplete package; reinstall it rather than installing an unrelated package named Autoscope. Xwayland is bundled; Flatpak is needed only for Flatpak apps. In a distrobox, use this runtime rather than a newer-host build in `~/.cargo/bin`.
+The plugin contains its runtime and helpers; there is no build or setup step. If tools are unavailable or the user asks to check Autoscope, run `runtime/AppRun doctor` from the plugin root (two directories above this skill) and read [the plugin README](../../README.md). A new Codex task or Claude Code session is required after installation. A missing runtime indicates an incomplete package; reinstall it rather than installing an unrelated package named Autoscope. Xwayland is bundled; Flatpak is needed only for Flatpak apps. In a distrobox, use this runtime rather than a newer-host build in `~/.cargo/bin`.
 
 ## Launch and observe
 

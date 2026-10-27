@@ -1,0 +1,13 @@
+{
+  "name": "autoscope",
+  "owner": {
+    "name": "nipah~✰!"
+  },
+  "description": "Autoscope with its prebuilt Linux runtime.",
+  "plugins": [
+    {
+      "name": "autoscope",
+      "source": "./"
+    }
+  ]
+}
