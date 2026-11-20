@@ -1,6 +1,8 @@
 //! Real compositor/process integration. Run with `cargo test --test session_workflow -- --ignored`.
 use std::{
     fs,
+    io::{BufRead, BufReader, Write},
+    os::unix::net::UnixStream,
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
@@ -92,6 +94,16 @@ fn detached_shared_files_and_recording_survive_signal_shutdown() {
     let live = json_command(&["status", session.field("session")]);
     assert_eq!(live["status"], "ready");
     assert!(live["live"]["frame"].as_u64().is_some());
+
+    let mut incomplete = UnixStream::connect(session.field("control")).unwrap();
+    incomplete.write_all(b"{").unwrap();
+    let mut next = UnixStream::connect(session.field("control")).unwrap();
+    next.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+    next.write_all(b"{\"cmd\":\"info\"}\n").unwrap();
+    let mut reply = String::new();
+    BufReader::new(next).read_line(&mut reply).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&reply).unwrap()["ok"], true);
+    drop(incomplete);
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while !shared.join("argument.txt").exists() {

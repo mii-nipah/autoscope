@@ -12,7 +12,7 @@ use serde_json::json;
 use smithay::{
     backend::{
         input::{Axis, AxisSource, ButtonState, InputTime},
-        renderer::element::memory::MemoryRenderBuffer,
+        renderer::{element::memory::MemoryRenderBuffer, utils::with_renderer_surface_state},
     },
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{
@@ -31,7 +31,9 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        dmabuf::DmabufState,
         output::OutputManagerState,
+        seat::WaylandFocus,
         selection::data_device::DataDeviceState,
         shell::xdg::XdgShellState,
         shm::ShmState,
@@ -43,6 +45,7 @@ use smithay::{
 use crate::{
     control::{self, Envelope, Recorder, RecordingOptions, Request, Response, Viewer},
     cursor,
+    render::Backend,
     session::{self, ExitReason},
     x11::X11State,
 };
@@ -58,6 +61,8 @@ pub struct Autoscope {
     pub xwayland_shell_state: XWaylandShellState,
     pub x11: X11State,
     pub shm_state: ShmState,
+    pub(crate) dmabuf_state: DmabufState,
+    pub(crate) backend: Backend,
     _output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Self>,
     pub data_device_state: DataDeviceState,
@@ -71,8 +76,8 @@ pub struct Autoscope {
     control_rx: Receiver<Envelope>,
     stream_listener: UnixListener,
     streams: Vec<UnixStream>,
-    recorder: Option<Recorder>,
-    latest_frame: Option<Vec<u8>>,
+    recorder: Result<Option<Recorder>, String>,
+    latest_frame: Result<Option<Vec<u8>>, String>,
     frame_seq: u64,
     view_seq: u64,
     view_sample: Option<Vec<[u8; 3]>>,
@@ -86,7 +91,7 @@ impl Autoscope {
         display: Display<Self>,
         control_rx: Receiver<Envelope>,
         stream_listener: UnixListener,
-        size: (i32, i32),
+        backend: Backend,
         fps: u32,
     ) -> Self {
         let display_handle = display.handle();
@@ -94,6 +99,11 @@ impl Autoscope {
         let xdg_shell_state = XdgShellState::new::<Self>(&display_handle);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&display_handle);
         let shm_state = ShmState::new::<Self>(&display_handle, vec![]);
+        let mut dmabuf_state = DmabufState::new();
+        if let Some(feedback) = backend.dmabuf_feedback() {
+            dmabuf_state.create_global_with_default_feedback::<Self>(&display_handle, feedback);
+        }
+        let size = backend.size();
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&display_handle);
         let data_device_state = DataDeviceState::new::<Self>(&display_handle);
         let mut seat_state = SeatState::new();
@@ -121,6 +131,8 @@ impl Autoscope {
             xwayland_shell_state,
             x11: X11State::Stopped,
             shm_state,
+            dmabuf_state,
+            backend,
             _output_manager_state: output_manager_state,
             seat_state,
             data_device_state,
@@ -134,8 +146,8 @@ impl Autoscope {
             control_rx,
             stream_listener,
             streams: Vec::new(),
-            recorder: None,
-            latest_frame: None,
+            recorder: Ok(None),
+            latest_frame: Ok(None),
             frame_seq: 0,
             view_seq: 0,
             view_sample: None,
@@ -172,8 +184,15 @@ impl Autoscope {
                 "frame": self.frame_seq,
                 "view": self.view_seq,
                 "cursor": [self.pointer.x, self.pointer.y],
-                "recording": self.recorder.as_ref().map(|r| &r.path),
+                "recording": self.recorder.as_ref().ok().and_then(Option::as_ref).map(|r| &r.path),
                 "surfaces": self.space.elements().count(),
+                "mapped_surfaces": self.space.elements().filter(|window| {
+                    window.wl_surface().is_some_and(|surface| {
+                        with_renderer_surface_state(&surface, |state| state.buffer().is_some())
+                            .unwrap_or(false)
+                    })
+                }).count(),
+                "render_error": self.latest_frame.as_ref().err(),
             })),
             Request::Move {
                 x,
@@ -250,6 +269,9 @@ impl Autoscope {
     }
 
     fn expect_view(&self, expected: Option<u64>) -> Result<(), String> {
+        if expected.is_some() {
+            self.latest_frame.as_ref().map_err(Clone::clone)?;
+        }
         if let Some(expected) = expected
             && expected != self.view_seq
         {
@@ -332,6 +354,8 @@ impl Autoscope {
         let frame = self
             .latest_frame
             .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref()
             .ok_or_else(|| "no frame rendered yet".to_string())?;
         control::write_png(path, self.size.0 as u32, self.size.1 as u32, frame)
             .map_err(|e| e.to_string())
@@ -342,28 +366,34 @@ impl Autoscope {
         path: &std::path::Path,
         options: RecordingOptions,
     ) -> Result<u32, String> {
-        if self.recorder.is_some() {
+        if matches!(self.recorder, Ok(Some(_))) {
             return Err("a recording is already active".into());
         }
+        let frame = self.latest_frame.as_ref().map_err(Clone::clone)?;
         let mut recorder = Recorder::start(path, self.size, self.fps, options)
             .map_err(|error| error.to_string())?;
-        if let Some(frame) = &self.latest_frame {
-            recorder.frame(frame).map_err(|error| error.to_string())?;
+        if let Some(frame) = frame
+            && let Err(error) = recorder.frame(frame)
+        {
+            let _ = recorder.finish();
+            return Err(error.to_string());
         }
         let fps = recorder.fps;
-        self.recorder = Some(recorder);
+        self.recorder = Ok(Some(recorder));
         Ok(fps)
     }
 
     fn stop_recording(&mut self) -> Result<control::RecordingResult, String> {
-        self.recorder
-            .take()
+        std::mem::replace(&mut self.recorder, Ok(None))?
             .ok_or_else(|| "no recording is active".to_string())?
             .finish()
             .map_err(|e| e.to_string())
     }
 
     pub fn publish_frame(&mut self, frame: Vec<u8>) {
+        if self.latest_frame.is_err() {
+            tracing::info!("frame capture recovered");
+        }
         self.frame_seq += 1;
         let sample = control::timing::sample_frame(&frame);
         if self
@@ -400,17 +430,26 @@ impl Autoscope {
         {
             self.viewer.take().unwrap().stop();
         }
-        if self
-            .recorder
-            .as_mut()
-            .is_some_and(|recorder| recorder.frame(&frame).is_err())
+        if let Ok(Some(recorder)) = self.recorder.as_mut()
+            && let Err(error) = recorder.frame(&frame)
         {
-            tracing::error!("recorder stopped accepting frames");
-            if let Some(recorder) = self.recorder.take() {
+            tracing::error!(%error, "recorder stopped accepting frames");
+            if let Ok(Some(recorder)) = std::mem::replace(
+                &mut self.recorder,
+                Err(format!("recording stopped while writing frames: {error}")),
+            ) {
                 let _ = recorder.finish();
             }
         }
-        self.latest_frame = Some(frame);
+        self.latest_frame = Ok(Some(frame));
+    }
+
+    pub(crate) fn capture_failed(&mut self, error: anyhow::Error) {
+        if self.latest_frame.is_ok() {
+            tracing::warn!(%error, "frame capture failed; waiting for the next frame");
+            self.view_sample = None;
+        }
+        self.latest_frame = Err(format!("frame capture failed: {error:#}"));
     }
 
     pub fn poll_app(&mut self) {
@@ -437,7 +476,7 @@ impl Autoscope {
     }
 
     pub fn shutdown(&mut self) {
-        if let Some(recorder) = self.recorder.take() {
+        if let Ok(Some(recorder)) = std::mem::replace(&mut self.recorder, Ok(None)) {
             let _ = recorder.finish();
         }
         if let Some(viewer) = self.viewer.take() {

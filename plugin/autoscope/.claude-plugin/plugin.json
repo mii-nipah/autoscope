@@ -1,7 +1,7 @@
 {
   "name": "autoscope",
   "displayName": "Autoscope",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Give Claude eyes and hands inside isolated Linux applications, with screenshots after every action.",
   "author": {
     "name": "nipah~✰!"

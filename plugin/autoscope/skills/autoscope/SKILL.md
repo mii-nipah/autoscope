@@ -16,7 +16,7 @@ The plugin contains its runtime and helpers; there is no build or setup step. If
 - Discover the installed application executable or Flatpak ID. `spawn_command` takes `command: ["program", "arg", ...]`, without shell interpretation. For project apps, set `options.working_dir` to the absolute project directory and use a relative executable such as `./target/debug/my-app`. That directory becomes `/work` inside bwrap. The plugin server's own directory is not the user's project.
 - The plugin bundles bwrap, so native applications use filesystem isolation by default. Use `sandbox: "bwrap"` to require it explicitly. Resolve a sandbox failure before weakening isolation.
 - `spawn_flatpak` takes `application_id` and optional `arguments`. Autoscope creates the private displays and application profile. Avoid the user's normal browser/profile and host display sockets.
-- `options` supports `name`, `width`, `height`, `fps`, `shared_dir`, `window`, and `no_network`. Portrait is simply a taller display, e.g. `width: 390, height: 844`. `window: true` opens a read-only viewer when the user wants to watch.
+- `options` supports `name`, `width`, `height`, `fps`, `shared_dir`, `window`, `no_network`, and `no_gpu`. GPU use is automatic on compatible machines. Set `no_gpu: true` for a software display and to disable GPU access in the app sandbox. Portrait is simply a taller display, e.g. `width: 390, height: 844`. `window: true` opens a read-only viewer when the user wants to watch.
 - Inspect the returned image before choosing an action. Every input requires the latest returned `view`. Perform one action, inspect its image, and use its new view for the next. Do not send parallel or preplanned inputs for the same session.
 - A stale-view error means no input was injected. Take a fresh `screenshot`, inspect it, and choose again. A visual wait timeout does not mean the action failed; inspect before retrying. Stable pixels do not prove that an application operation succeeded.
 
@@ -36,4 +36,4 @@ Recordings default to LK motion arrows (`motion: "arrows"`). Set `motion: "trail
 
 Check the requested application outcome, then `close_session`. `list_sessions` lists only sessions owned by this MCP server. Server exit closes its sessions; shared files, logs, and recordings survive. For an explicitly persistent session, use the CLI's detached lifecycle and `autoscope readme` instead.
 
-Report what worked, the evidence, and any unverified boundary. Compatibility covers native Wayland and XWayland applications using shared-memory presentation; one successful app is not proof of all Linux/GPU/toolkit combinations.
+Report what worked, the evidence, and any unverified boundary. Autoscope supports software and GPU presentation for Wayland and XWayland on compatible drivers. Check the session log to see which renderer the app used.

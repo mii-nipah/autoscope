@@ -1,5 +1,5 @@
 use smithay::{
-    backend::renderer::utils::on_commit_buffer_handler,
+    backend::{allocator::dmabuf::Dmabuf, renderer::utils::on_commit_buffer_handler},
     desktop::{PopupKind, find_popup_root_surface, get_popup_toplevel_coords},
     input::{
         Seat, SeatHandler, SeatState,
@@ -19,6 +19,7 @@ use smithay::{
             CompositorClientState, CompositorHandler, CompositorState, get_parent,
             is_sync_subsurface, with_states,
         },
+        dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         output::OutputHandler,
         pointer_constraints::PointerConstraintsHandler,
         seat::WaylandFocus,
@@ -73,6 +74,24 @@ impl CompositorHandler for Autoscope {
 
 impl BufferHandler for Autoscope {
     fn buffer_destroyed(&mut self, _buffer: &wl_buffer::WlBuffer) {}
+}
+
+impl DmabufHandler for Autoscope {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(&mut self, _: &DmabufGlobal, buffer: Dmabuf, notifier: ImportNotifier) {
+        match self.backend.import_dmabuf(&buffer) {
+            Ok(()) => {
+                let _ = notifier.successful::<Self>();
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not import GPU buffer");
+                notifier.failed();
+            }
+        }
+    }
 }
 
 impl ShmHandler for Autoscope {

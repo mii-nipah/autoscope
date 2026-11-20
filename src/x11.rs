@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     ffi::OsString,
     fs::OpenOptions,
+    os::fd::AsRawFd,
     path::Path,
     process::Stdio,
     time::{Duration, Instant},
@@ -106,16 +107,54 @@ pub fn start(
     event_loop: &mut EventLoop<'static, Autoscope>,
     state: &mut Autoscope,
     log: &Path,
+) -> Option<u32> {
+    if crate::launch::which("Xwayland").is_none() {
+        tracing::info!("XWayland unavailable; starting with native Wayland");
+        return None;
+    }
+    let started = Instant::now();
+    let timeout = Duration::from_secs(5);
+    let mut deadline = started + timeout;
+    if state.backend.render_node().is_some() {
+        match start_server(event_loop, state, log, true, deadline) {
+            Ok(display) => return Some(display),
+            Err(error) => {
+                tracing::warn!(%error, "GPU XWayland startup failed; retrying in software")
+            }
+        }
+        deadline = (Instant::now() + timeout).min(started + Duration::from_secs(9));
+    }
+    if state.exit_reason.is_some() {
+        return None;
+    }
+    match start_server(event_loop, state, log, false, deadline) {
+        Ok(display) => Some(display),
+        Err(error) => {
+            tracing::warn!(%error, "XWayland startup failed; starting with native Wayland");
+            None
+        }
+    }
+}
+
+fn start_server(
+    event_loop: &mut EventLoop<'static, Autoscope>,
+    state: &mut Autoscope,
+    log: &Path,
+    gpu: bool,
+    deadline: Instant,
 ) -> Result<u32> {
     let log = OpenOptions::new().create(true).append(true).open(log)?;
     let mut args = Vec::<OsString>::new();
     if let Some(root) = std::env::var_os("XKB_CONFIG_ROOT") {
         args.extend(["-xkbdir".into(), root]);
     }
+    if !gpu {
+        args.push("-shm".into());
+    }
     let (mut xwayland, client) = XWayland::spawn(
         &state.display_handle,
         None,
-        std::iter::empty::<(String, String)>(),
+        gpu.then_some(("AUTOSCOPE_XWAYLAND_GPU", "1")),
         args,
         false,
         Stdio::from(log.try_clone()?),
@@ -124,11 +163,18 @@ pub fn start(
     )
     .context("start private XWayland server")?;
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut readiness = libc::pollfd {
+        fd: xwayland.poll_fd().as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
     loop {
         event_loop
             .dispatch(Some(Duration::from_millis(50)), state)
             .context("wait for XWayland readiness")?;
+        if state.exit_reason.is_some() {
+            bail!("session stopped during XWayland startup");
+        }
         match xwayland.take_socket() {
             Ok(Some(x11_socket)) => {
                 let display = xwayland.display_number();
@@ -145,10 +191,17 @@ pub fn start(
                 };
                 return Ok(display);
             }
-            Ok(None) if Instant::now() >= deadline => {
-                bail!("XWayland did not become ready within 5 seconds")
+            Ok(None) => {
+                // Smithay treats the readiness pipe closing without a display number as pending.
+                if unsafe { libc::poll(&mut readiness, 1, 0) } > 0
+                    && readiness.revents & libc::POLLHUP != 0
+                {
+                    bail!("XWayland exited before opening its display");
+                }
+                if Instant::now() >= deadline {
+                    bail!("XWayland did not open its display before the startup deadline");
+                }
             }
-            Ok(None) => {}
             Err(error) => return Err(error).context("wait for XWayland readiness"),
         }
     }
@@ -327,10 +380,32 @@ impl XwmHandler for Autoscope {
         }
     }
 
-    fn disconnected(&mut self, _xwm: XwmId) {
-        tracing::error!("private XWayland server disconnected");
-        self.stop(crate::session::ExitReason::Error {
-            message: "private XWayland server disconnected".into(),
-        });
+    fn disconnected(&mut self, xwm: XwmId) {
+        if matches!(&self.x11, X11State::Ready { wm, .. } if wm.id() == xwm) {
+            tracing::warn!("private XWayland disconnected; keeping the app session alive");
+            for window in self
+                .space
+                .elements()
+                .filter(|window| window.x11_surface().is_some())
+                .cloned()
+                .collect::<Vec<_>>()
+            {
+                self.space.unmap_elem(&window);
+            }
+            let keyboard = self.seat.get_keyboard().unwrap();
+            if keyboard
+                .current_focus()
+                .is_some_and(|focus| focus.0.x11_surface().is_some())
+            {
+                let focus = self
+                    .space
+                    .elements()
+                    .last()
+                    .cloned()
+                    .map(KeyboardFocus::from);
+                keyboard.set_focus(self, focus, SERIAL_COUNTER.next_serial());
+            }
+            stop(self);
+        }
     }
 }

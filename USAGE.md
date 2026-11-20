@@ -40,6 +40,7 @@ Run options:
 --window                    Open a read-only live viewer
 --sandbox auto|bwrap|off    Host-command sandbox; default: auto
 --no-network                Remove application network access
+--no-gpu                    Use a software display and turn off GPU access for sandboxed apps
 --shared-dir PATH           Share this folder read/write; defaults to a private durable folder
 --detach                    Return after startup and keep the session running independently
 --flatpak APP_ID            Launch a Flatpak instead of a host command
@@ -145,7 +146,11 @@ Copy input files into `shared_dir` and open that same absolute path in the appli
 
 By default, session metadata and shared files are retained under `$XDG_STATE_HOME/autoscope/sessions` (or `~/.local/state/autoscope/sessions`). They are not deleted on exit. Application stdout/stderr go to `log`; foreground compositor diagnostics go to stderr, and detached compositor diagnostics also go to `log`.
 
-With bwrap, the launch directory remains available read-only as `/work`; the application gets a private writable home and `/tmp`. Host displays, input devices, audio, session bus, and desktop portals are not exposed. `--no-network` also removes network access.
+With bwrap, the launch directory remains available read-only as `/work`. The application gets a private writable home and `/tmp`. Host displays, input devices, audio, session bus, and desktop portals are kept outside the sandbox. `--no-network` also removes network access.
+
+Autoscope uses a compatible GPU automatically for its virtual display and shares that GPU's render device with bwrap applications. If GPU initialization fails, Autoscope uses a software display. GPU presentation works through Wayland and XWayland with compatible host graphics drivers. `--no-gpu` also disables GPU access for Flatpak sessions. With `--sandbox off`, applications have ordinary access to host devices.
+
+If XWayland fails to start with the GPU, Autoscope retries XWayland in software before launching the app. Native Wayland sessions can run if XWayland is unavailable. A capture failure is reported in session info and screenshots while Autoscope waits for a fresh frame. A failed recording can be started again without reopening the app.
 
 Finish with:
 

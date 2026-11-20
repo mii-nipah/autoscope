@@ -71,6 +71,9 @@ struct RunArgs {
     /// Remove network access from the application sandbox.
     #[arg(long)]
     no_network: bool,
+    /// Use a software display and disable GPU access in application sandboxes.
+    #[arg(long)]
+    no_gpu: bool,
     /// A host folder shared read/write at the same absolute path inside the app.
     /// Defaults to a durable, private folder reported in the ready response.
     #[arg(long)]
@@ -240,13 +243,12 @@ fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
 
     let mut event_loop: EventLoop<'static, Autoscope> = EventLoop::try_new()?;
     let display: Display<Autoscope> = Display::new()?;
-    let backend = render::create_headless_backend(args.width, args.height)?;
-
     // Children inherit only the instance runtime directory and cannot discover
     // the host Wayland socket captured above for Flatpak/viewer launch plumbing.
     unsafe { std::env::set_var("XDG_RUNTIME_DIR", runtime.path()) };
     unsafe { std::env::remove_var("DISPLAY") };
 
+    let backend = render::Backend::new((args.width, args.height), args.no_gpu)?;
     let control_path = runtime.path().join("control.sock");
     let stream_path = runtime.path().join("stream.sock");
     let control_rx = control::start_server(&control_path)?;
@@ -258,20 +260,15 @@ fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
         display,
         control_rx,
         stream_listener,
-        (args.width, args.height),
+        backend,
         args.fps,
     );
-    render::install(&mut event_loop, &mut state, backend, args.fps)?;
-    let xdisplay = if launch::which("Xwayland").is_some() {
-        Some(x11::start(
-            &mut event_loop,
-            &mut state,
-            &files.root.join("session.log"),
-        )?)
-    } else {
-        tracing::info!("Xwayland is not installed; running with native Wayland support");
-        None
-    };
+    render::install(&mut event_loop, &mut state, args.fps)?;
+    let log = files.root.join("session.log");
+    let xdisplay = x11::start(&mut event_loop, &mut state, &log);
+    if state.exit_reason.is_some() {
+        bail!("session stopped before launching the application");
+    }
 
     let spec = match args.flatpak {
         Some(app_id) => LaunchSpec::Flatpak {
@@ -291,7 +288,9 @@ fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
             runtime: runtime.path(),
             wayland_display: &state.socket_name,
             xdisplay,
-            log: &files.root.join("session.log"),
+            gpu_render_node: state.backend.render_node(),
+            no_gpu: args.no_gpu,
+            log: &log,
             shared: &files.shared,
         },
         &host,
@@ -325,8 +324,12 @@ fn run_session(args: RunArgs, files: &session::Files) -> Result<()> {
     x11::stop(&mut state);
     let cleanup = cleanup_runtime(runtime.path());
     result?;
-    cleanup?;
-    files.update(json!({"status": "exited", "exit": state.exit_reason}))?;
+    let mut exit = json!({"status": "exited", "exit": state.exit_reason});
+    if let Err(error) = cleanup {
+        tracing::warn!(%error, "could not clean up the private runtime after exit");
+        exit["cleanup_error"] = format!("{error:#}").into();
+    }
+    files.update(exit)?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "autoscope"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["nipah~✰!"]
 license = "BSD-3-Clause"
@@ -12,6 +12,7 @@ anyhow = "1.0"
 base64 = "0.23"
 clap = { version = "4.5", features = ["derive"] }
 libc = "0.2"
+libloading = "0.8"
 image = { version = "0.25.10", default-features = false }
 optical-flow-lk = "=0.6.0"
 png = "0.18"
@@ -28,4 +29,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 git = "https://github.com/Smithay/smithay"
 rev = "92ba0e92c2f8e775cc61a17bdf8a68e122c15610"
 default-features = false
-features = ["desktop", "renderer_pixman", "wayland_frontend", "xwayland"]
+features = ["desktop", "renderer_gl", "renderer_pixman", "wayland_frontend", "xwayland"]

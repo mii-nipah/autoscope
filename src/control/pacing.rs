@@ -203,9 +203,15 @@ fn wait_until_stable(
             return Err(response.error.unwrap_or_else(|| "info failed".into()));
         }
         let info = response.result.unwrap_or(Value::Null);
+        let elapsed = start.elapsed();
+        if let Some(error) = info["render_error"].as_str() {
+            if elapsed >= timeout {
+                return Err(error.to_owned());
+            }
+            continue;
+        }
         let frame = info["frame"].as_u64().ok_or("info omitted frame")?;
         let view = info["view"].as_u64().ok_or("info omitted view")?;
-        let elapsed = start.elapsed();
         if let Some(status) = settler.observe(elapsed, view) {
             return Ok(json!({
                 "status": match status {

@@ -129,16 +129,18 @@ document.querySelector('#result').textContent='Verified: '+text;};</script>'''
             assert xmessage, "Install xmessage for the native X11 working-directory check"
             fixture = project / "launch.sh"
             fixture.write_text('#!/bin/sh\nset -eu\n[ "$PWD" = /work ]\n[ ! -w . ]\n'
+                               'if [ "${1-}" = --check-no-gpu ]; then test ! -e /dev/dri; fi\n'
                                'cat proof.txt > "$AUTOSCOPE_SHARED_DIR/proof.txt"\n'
                                f'{shlex.quote(xmessage)} -buttons OK:0 -default OK "Autoscope project workspace verified"\n'
                                'echo clicked > "$AUTOSCOPE_SHARED_DIR/ui.txt"\nexec sleep 300\n')
             fixture.chmod(0o755)
-            for network in (False, True):
+            for network, no_gpu in ((False, True), (True, False)):
                 (shared / "proof.txt").unlink(missing_ok=True)
                 (shared / "ui.txt").unlink(missing_ok=True)
-                native = mcp.tool("spawn_command", command=["./launch.sh"], sandbox="bwrap",
+                command = ["./launch.sh", "--check-no-gpu"] if no_gpu else ["./launch.sh"]
+                native = mcp.tool("spawn_command", command=command, sandbox="bwrap",
                                   options={"working_dir": str(project), "shared_dir": str(shared),
-                                           "no_network": not network})
+                                           "no_network": not network, "no_gpu": no_gpu})
                 native_state = save_image(native, artifacts / f"native-workspace-network-{network}.png")
                 assert (shared / "proof.txt").read_bytes() == (project / "proof.txt").read_bytes()
                 mcp.tool("press_key", session=native_state["session"], view=native_state["view"], combo="ENTER")
@@ -175,7 +177,7 @@ document.querySelector('#result').textContent='Verified: '+text;};</script>'''
             assert sessions == [], sessions
             assert submitted.empty(), "Stale input unexpectedly submitted the form again"
             report = {"tools": len(tools), "project_working_directory": "verified read-only /work",
-                      "native_x11_network": [False, True],
+                      "native_x11_network": [False, True], "gpu_opt_out": "verified no /dev/dri",
                       "form_submission": "Autoscope works", "stale_input_rejected": True,
                       "recording_sheets": len(images), "sessions_after_close": sessions}
             (artifacts / "result.json").write_text(json.dumps(report, indent=2) + "\n")

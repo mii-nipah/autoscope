@@ -42,6 +42,8 @@ Screenshots accompany actions, and each input must use the latest `view`. If the
 
 For a project application, `spawn_command` accepts `options.working_dir` as an absolute project directory and a relative command such as `./target/debug/my-app`. That directory is mounted read-only at `/work` under bwrap.
 
+Autoscope automatically uses a compatible GPU for its virtual display. Set `options.no_gpu: true` on either spawn tool to use a software display and disable GPU access for the sandboxed app.
+
 ## Troubleshooting and manual use
 
 - **Tools missing after installation:** start a new Codex task or Claude Code session. If `runtime/AppRun` is missing, reinstall the complete binary plugin package.

@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
     thread,
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -155,8 +156,12 @@ pub fn start_server(path: &Path) -> Result<Receiver<Envelope>> {
 }
 
 fn serve(listener: UnixListener, tx: Sender<Envelope>) {
+    let timeout = Some(Duration::from_secs(2));
     for connection in listener.incoming() {
         let Ok(mut stream) = connection else { break };
+        if stream.set_read_timeout(timeout).is_err() || stream.set_write_timeout(timeout).is_err() {
+            continue;
+        }
         let response = read_request(&stream)
             .and_then(|request| pacing::execute(&tx, request))
             .unwrap_or_else(Response::error);

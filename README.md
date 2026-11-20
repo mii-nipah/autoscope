@@ -98,7 +98,7 @@ flowchart LR
     agent["Agent<br/>CLI, socket, or MCP"] -- "control socket" --> seat
     subgraph session["autoscope session"]
         seat["Smithay seat<br/>the only input source"] --> app["Application<br/>Wayland, or X11 via Xwayland<br/>inside bwrap or Flatpak"]
-        app --> compositor["Headless compositor<br/>Pixman renderer + cursor"]
+        app --> compositor["Headless compositor<br/>GPU or software renderer + cursor"]
         compositor --> frame[("One RGBA frame")]
     end
     frame --> shots["Screenshots"]
@@ -107,9 +107,9 @@ flowchart LR
     frame --> viewer["Read-only viewer"]
 ```
 
-Each session is a one-application Wayland compositor built on [Smithay](https://github.com/Smithay/smithay)'s headless Pixman renderer, with an optional rootless Xwayland server. X11 windows become ordinary Smithay windows, so both protocols share one output, one seat, one cursor, and one canonical frame. Screenshots, recordings, the stream, and the viewer all read that frame. Host input devices are never admitted; only control-socket commands reach the seat.
+Each session is a one-application Wayland compositor built on [Smithay](https://github.com/Smithay/smithay), with an optional rootless Xwayland server. Autoscope uses a compatible GPU for the virtual display when available and falls back to software. X11 windows become ordinary Smithay windows, so both protocols share one output, one seat, one cursor, and one canonical frame. Screenshots, recordings, the stream, and the viewer all read that frame. Only control-socket commands reach the seat.
 
-Under bubblewrap the app sees `/usr`, `/etc`, and `/sys` read-only, a private home and `/tmp`, the launch directory read-only at `/work`, its private displays, and the shared folder read/write. Host displays, the session bus, audio, input devices, and desktop portals stay outside. Flatpak apps are reset with `--sandbox`, then granted only their private displays and session directory, the shared folder, GPU rendering, and network access unless `--no-network` is set.
+Under bubblewrap the app sees `/usr`, `/etc`, and `/sys` read-only, a private home and `/tmp`, the launch directory read-only at `/work`, its private displays, the shared folder read/write, and the selected GPU render device when available. Host displays, the session bus, audio, input devices, and desktop portals stay outside. Flatpak apps are reset with `--sandbox` and get their private display, session directory, shared folder, GPU access, and network access. Use `--no-gpu` or MCP `options.no_gpu` for a software display with GPU access disabled in the app sandbox. Use `--no-network` to remove network access.
 
 There is intentionally no desktop shell, portal bridge, clipboard bridge, audio bridge, or remote protocol.
 

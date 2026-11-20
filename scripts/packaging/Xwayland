@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+server=${0%/*}/Xwayland.bin
+
+if [ "${AUTOSCOPE_XWAYLAND_GPU:-}" = 1 ]; then
+    loader=@ELF_INTERPRETER@
+    # Host Mesa needs the matching Wayland and GBM libraries ahead of the bundle.
+    paths=$("$loader" --list-diagnostics 2>/dev/null | (
+        separator=
+        while IFS= read -r line; do
+            case "$line" in
+                path.system_dirs\[*\]=\"*\")
+                    dir=${line#*\"}
+                    printf '%s%s' "$separator" "${dir%\"}"
+                    separator=:
+                    ;;
+            esac
+        done
+    ))
+    if [ -n "$paths" ] && LD_BIND_NOW=1 "$loader" --library-path "$paths" "$server" -version >/dev/null 2>&1; then
+        exec "$loader" --library-path "$paths" "$server" "$@"
+    fi
+fi
+
+exec "$server" "$@"

@@ -34,6 +34,8 @@ pub(super) struct SessionOptions {
     window: Option<bool>,
     /// Remove application network access.
     no_network: Option<bool>,
+    /// Use a software display and disable GPU access in application sandboxes.
+    no_gpu: Option<bool>,
     /// Host folder shared read/write with the app; defaults to a durable private folder.
     shared_dir: Option<PathBuf>,
     /// Absolute application working directory; also mounted read-only at /work under bwrap.
@@ -107,7 +109,6 @@ struct Session {
     info: SessionInfo,
     control: PathBuf,
     child: Child,
-    recording: bool,
     observed_view: Option<u64>,
 }
 
@@ -118,20 +119,25 @@ impl Session {
             if let Some(status) = self.child.try_wait()? {
                 bail!("application session exited before showing a window: {status}");
             }
-            if let Ok(response) = control::send_request(&self.control, &Request::Info)
-                && response.ok
-                && response
-                    .result
-                    .as_ref()
-                    .and_then(|result| result["surfaces"].as_u64())
-                    .is_some_and(|surfaces| surfaces > 0)
+            if let Ok(response) = control::send_request_with_timeout(
+                &self.control,
+                &Request::Info,
+                Some(Duration::from_secs(2)),
+            ) && response.ok
+                && response.result.as_ref().is_some_and(|result| {
+                    result["mapped_surfaces"]
+                        .as_u64()
+                        .is_some_and(|count| count > 0)
+                        && result["render_error"].is_null()
+                })
             {
-                let response = control::send_request(
+                let response = control::send_request_with_timeout(
                     &self.control,
                     &Request::Wait {
                         timeout_ms: 5_000,
                         quiet_ms: 750,
                     },
+                    Some(Duration::from_secs(7)),
                 )?;
                 if !response.ok {
                     bail!(
@@ -150,8 +156,9 @@ impl Session {
     }
 
     fn stop(mut self) -> Result<()> {
-        let _ = control::send_request(&self.control, &Request::Quit);
         let deadline = Instant::now() + STOP_TIMEOUT;
+        let _ =
+            control::send_request_with_timeout(&self.control, &Request::Quit, Some(STOP_TIMEOUT));
         while Instant::now() < deadline {
             if self.child.try_wait()?.is_some() {
                 return Ok(());
@@ -222,6 +229,9 @@ impl Coordinator {
         if options.no_network.unwrap_or(false) {
             command.arg("--no-network");
         }
+        if options.no_gpu.unwrap_or(false) {
+            command.arg("--no-gpu");
+        }
         if let Some(path) = options.shared_dir {
             command.arg("--shared-dir").arg(path);
         }
@@ -272,12 +282,14 @@ impl Coordinator {
             info: info.clone(),
             control: ready.control,
             child,
-            recording: false,
             observed_view: None,
         };
         if let Err(error) = session.wait_for_surface() {
             let _ = session.stop();
-            return Err(error);
+            anyhow::bail!(
+                "{error:#}; see {}",
+                info.session_dir.join("session.log").display()
+            );
         }
         self.sessions.insert(session_id, session);
         Ok(info)
@@ -386,22 +398,12 @@ impl Coordinator {
         session: &str,
         options: RecordingOptions,
     ) -> Result<ActionResult> {
-        self.reap()?;
-        if self
-            .sessions
-            .get(session)
-            .with_context(|| format!("unknown or exited session {session:?}"))?
-            .recording
-        {
-            bail!("session is already recording");
-        }
         let extension = match options.mode {
             RecordingMode::Video => "mp4",
             RecordingMode::Images => "png",
         };
         let path = self.artifact_path(session, extension);
         let result = self.request(session, Request::RecordStart { path, options })?;
-        self.sessions.get_mut(session).unwrap().recording = true;
         Ok(ActionResult {
             session: session.into(),
             result,
@@ -409,16 +411,7 @@ impl Coordinator {
     }
 
     pub(super) fn stop_recording(&mut self, session: &str) -> Result<RecordingResult> {
-        if !self
-            .sessions
-            .get(session)
-            .with_context(|| format!("unknown or exited session {session:?}"))?
-            .recording
-        {
-            bail!("session was not recording");
-        }
         let result = self.request(session, Request::RecordStop)?;
-        self.sessions.get_mut(session).unwrap().recording = false;
         serde_json::from_value(result).context("decode recording result")
     }
 

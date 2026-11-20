@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,13 @@ for path in (*bin_dir.iterdir(), *lib_dir.iterdir()):
 required_glibc = max(glibc_versions, key=lambda version: tuple(map(int, version.split("."))))
 if tuple(map(int, required_glibc.split("."))) > (2, 35):
     raise RuntimeError(f"Runtime requires glibc {required_glibc}; rebuild with scripts/build-bundle.sh")
+
+xwayland = bin_dir / "Xwayland"
+loader = subprocess.check_output(["patchelf", "--print-interpreter", str(xwayland)], text=True).strip()
+xwayland.rename(bin_dir / "Xwayland.bin")
+wrapper = (source / "scripts/packaging/Xwayland").read_text()
+xwayland.write_text(wrapper.replace("@ELF_INTERPRETER@", shlex.quote(loader)))
+xwayland.chmod(0o755)
 
 shutil.copytree("/usr/share/X11/xkb", appdir / "usr/share/X11/xkb")
 shutil.copy2(source / "scripts/packaging/AppRun", appdir / "AppRun")

@@ -64,6 +64,8 @@ pub struct LaunchSession<'a> {
     pub runtime: &'a Path,
     pub wayland_display: &'a OsStr,
     pub xdisplay: Option<u32>,
+    pub gpu_render_node: Option<&'a Path>,
+    pub no_gpu: bool,
     pub log: &'a Path,
     pub shared: &'a Path,
 }
@@ -123,11 +125,15 @@ fn spawn_flatpak(
         "--no-session-bus",
         "--no-a11y-bus",
         "--no-documents-portal",
-        "--device=dri",
         "--command=sh",
         "--nosocket=wayland",
         "--nosocket=x11",
     ]);
+    command.arg(if session.no_gpu {
+        "--nodevice=dri"
+    } else {
+        "--device=dri"
+    });
     if display.is_some() {
         command.arg("--socket=x11");
     }
@@ -312,6 +318,12 @@ fn spawn_command(
         }
         command.args(["--ro-bind"]).arg(&socket).arg(&socket);
         command.args(["--setenv", "DISPLAY", &format!(":{display}")]);
+    }
+    if let Some(node) = session.gpu_render_node {
+        command
+            .args(["--dir", "/dev/dri", "--dev-bind-try"])
+            .arg(node)
+            .arg(node);
     }
     if network {
         command.arg("--share-net");
